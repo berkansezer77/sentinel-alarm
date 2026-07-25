@@ -27,6 +27,10 @@ Assistant is the engine that runs them.**
 It gives you a real `alarm_control_panel` entity, a Lovelace card, and a settings UI
 that covers everything from entry delays to holiday light simulation.
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/berkansezer77/sentinel-alarm/main/docs/images/status.png" alt="Sentinel status page">
+</p>
+
 ## Features
 
 ### Zones & sensors
@@ -35,13 +39,27 @@ that covers everything from entry delays to holiday light simulation.
 - **Presence confirmation**: require a presence sensor to stay active for *N* seconds **and** be confirmed by motion in the same room before it counts as an intrusion — kills false alarms from flaky mmWave sensors
 - Per-sensor rules: instant, entry-delayed, or ignored per mode
 
+<img src="https://raw.githubusercontent.com/berkansezer77/sentinel-alarm/main/docs/images/zones.png" alt="Alarm zones, grouped by room">
+
+Each sensor then gets its own tuning — how long it must stay active before it counts,
+whether a second sensor has to agree, whether it starts the entry delay:
+
+<img src="https://raw.githubusercontent.com/berkansezer77/sentinel-alarm/main/docs/images/sensors.png" alt="Per-sensor tuning">
+
 ### Modes
 - `Home`, `Away`, `Sleep`, `Vacation` — each with its own sensor set, entry/exit delays and action list
 - Copy an entire action list from one mode to another in one click
 
+<img src="https://raw.githubusercontent.com/berkansezer77/sentinel-alarm/main/docs/images/modes.png" alt="Modes">
+
 ### Actions
 A visual step editor for what happens on **trigger**, during **arming**, on **entry
 delay**, on **arm** and on **disarm** — separately for each mode.
+
+<img src="https://raw.githubusercontent.com/berkansezer77/sentinel-alarm/main/docs/images/actions.png" alt="Action step editor">
+
+Steps run in order, or side by side — each one shows how long it takes, and the list
+tells you the total. Run any single step, or the whole chain, without arming anything.
 
 Available step types:
 - **Notification** — Home Assistant Companion or Telegram, with explicit bot/chat selection, camera snapshot attachment, and Disarm / Silence buttons inside the push
@@ -64,17 +82,25 @@ being installed. Voice selection dropdowns everywhere a voice can be chosen.
 - **Entity triggers** — arm or disarm from any entity's state (states are read from Home Assistant automatically, and can be typed manually)
 - **Lights off when armed** — sweep the house dark on arming, automatically skipping the night lights
 
+<img src="https://raw.githubusercontent.com/berkansezer77/sentinel-alarm/main/docs/images/automatic.png" alt="Automatic arming">
+
 ### Night lights (Sleep mode)
 A draggable timeline that keeps chosen lights on overnight at a set brightness and
 colour, from sunset to sunrise, then restores them to full brightness on disarm.
+
+<img src="https://raw.githubusercontent.com/berkansezer77/sentinel-alarm/main/docs/images/night-lights.png" alt="Night lights">
 
 ### Vacation simulation
 A human-looking light schedule generated between sunset and sunrise — draggable on a
 timeline, with per-block duplicate and delete, so it never looks like a timer.
 
+<img src="https://raw.githubusercontent.com/berkansezer77/sentinel-alarm/main/docs/images/vacation.png" alt="Vacation simulation">
+
 ### Activity log
 "What actually ran" — a timeline of every armed / triggered / disarmed event with
 every action step underneath it, and why each one ran or was skipped.
+
+<img src="https://raw.githubusercontent.com/berkansezer77/sentinel-alarm/main/docs/images/activity.png" alt="Activity log">
 
 ### Backup
 Export your whole configuration to a file and import it back.
