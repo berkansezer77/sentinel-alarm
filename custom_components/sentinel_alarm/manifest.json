@@ -1,0 +1,12 @@
+{
+  "domain": "sentinel_alarm",
+  "name": "Sentinel Alarm",
+  "codeowners": ["@berkansezer77"],
+  "config_flow": true,
+  "dependencies": ["http", "panel_custom", "websocket_api"],
+  "documentation": "https://github.com/berkansezer77/sentinel-alarm",
+  "issue_tracker": "https://github.com/berkansezer77/sentinel-alarm/issues",
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "version": "1.0.0"
+}

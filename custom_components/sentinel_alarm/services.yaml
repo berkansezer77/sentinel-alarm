@@ -1,0 +1,22 @@
+arm:
+  name: Arm
+  description: Arm (or disarm) the Sentinel Alarm, optionally ignoring open contacts.
+  fields:
+    mode:
+      name: Mode
+      description: Which mode to switch to.
+      required: true
+      selector:
+        select:
+          options:
+            - home
+            - away
+            - night
+            - vacation
+            - disarm
+    bypass_open:
+      name: Bypass open contacts
+      description: Arm even if a door or window is currently open.
+      default: false
+      selector:
+        boolean:
