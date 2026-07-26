@@ -51,6 +51,10 @@ class SentinelAlarmCard extends HTMLElement {
     this._entity = this._config.entity || "alarm_control_panel.sentinel_alarm";
     this._built = false;
     this._pick = null;            // sekmede seçili mod (kurmadan önce)
+    // Acik/kapali tercihi tarayicida kalir — her yenilemede kapanmasin.
+    let open = true;
+    try { open = localStorage.getItem("sentinel_card_open") !== "0"; } catch (e) { /* özel mod */ }
+    this._open = open;
   }
 
   set hass(hass) {
@@ -61,6 +65,14 @@ class SentinelAlarmCard extends HTMLElement {
     this._lastSt = st;
     this._render();
     if (first) { this._loadHistory(); this._loadTimeline(); }
+  }
+
+  _toggle() {
+    this._open = !this._open;
+    try { localStorage.setItem("sentinel_card_open", this._open ? "1" : "0"); } catch (e) { /* özel mod */ }
+    if (this._fold) this._fold.classList.toggle("open", this._open);
+    const b = this.shadowRoot && this.shadowRoot.querySelector(".exp");
+    if (b) b.classList.toggle("open", this._open);
   }
 
   connectedCallback() { this._startTick(); }
@@ -283,17 +295,23 @@ class SentinelAlarmCard extends HTMLElement {
     const style = ce("style");
     style.textContent = `
       :host{display:block;}
-      .glow{position:relative;border-radius:22px;}
-      /* nefes alan cerceve — durum rengini --gl degiskeninden alir */
-      .glow::before{content:"";position:absolute;inset:-3px;border-radius:24px;
-        background:radial-gradient(60% 120% at 0% 0%, var(--gl) 0%, transparent 60%),
-                   radial-gradient(60% 120% at 100% 0%, var(--gl) 0%, transparent 60%),
-                   radial-gradient(70% 130% at 50% 100%, var(--gl) 0%, transparent 62%);
-        filter:blur(15px);opacity:.85;z-index:0;
-        animation:breathe 4.5s ease-in-out infinite;}
-      @keyframes breathe{0%,100%{opacity:.5;filter:blur(13px);}50%{opacity:1;filter:blur(19px);}}
-      .glow.hot::before{animation-duration:1.1s;}
-      @media (prefers-reduced-motion: reduce){.glow::before{animation:none;opacity:.7;}}
+      .glow{position:relative;border-radius:22px;isolation:isolate;}
+      /* Kenar boyunca donen renkli isik. Konik gradyan karttan biraz tasar,
+         bulaniklastirilir ve yavasca doner — durum rengi --g1/--g2/--g3'ten
+         gelir, boylece kapali yesil, kurulu kirmizi olur. */
+      .glow::before,.glow::after{content:"";position:absolute;inset:-2px;border-radius:24px;
+        background:conic-gradient(from var(--spin,0deg),
+          var(--g1) 0deg, var(--g2) 70deg, var(--g3) 150deg, transparent 210deg,
+          var(--g1) 280deg, var(--g2) 340deg, var(--g1) 360deg);
+        z-index:-1;animation:spin var(--sp,7s) linear infinite;}
+      .glow::before{filter:blur(16px);opacity:.9;}
+      .glow::after{filter:blur(3px);opacity:.55;inset:-1px;}
+      @keyframes spin{to{--spin:360deg;}}
+      @property --spin{syntax:'<angle>';initial-value:0deg;inherits:false;}
+      .glow.hot{--sp:2.2s;}
+      @media (prefers-reduced-motion: reduce){
+        .glow::before,.glow::after{animation:none;}
+      }
 
       ha-card{position:relative;z-index:1;background:#0b0910;border-radius:22px;
         border:.5px solid #241f2c;overflow:hidden;color:#fff;
@@ -313,6 +331,17 @@ class SentinelAlarmCard extends HTMLElement {
 
       .sub{font-size:10px;letter-spacing:1.5px;color:#6f6779;text-transform:uppercase;
         align-self:center;}
+      .exp{margin-left:8px;width:30px;height:30px;flex:0 0 30px;border-radius:9px;
+        background:#141019;border:.5px solid #262030;color:#8b8296;cursor:pointer;
+        display:flex;align-items:center;justify-content:center;font-size:13px;
+        transition:transform .25s,color .2s;touch-action:manipulation;
+        -webkit-tap-highlight-color:transparent;user-select:none;}
+      .exp:hover{color:#fff;}
+      .exp.open{transform:rotate(180deg);}
+      /* Katlanan bolum: yukseklik gecisi icin grid 0fr -> 1fr numarasi */
+      .fold{display:grid;grid-template-rows:0fr;transition:grid-template-rows .32s ease;}
+      .fold.open{grid-template-rows:1fr;}
+      .fold > .foldin{overflow:hidden;min-height:0;}
 
       /* --- oda hareket cizelgesi --- */
       .tl{border-top:.5px solid #1d1825;border-bottom:.5px solid #1d1825;
@@ -421,8 +450,14 @@ class SentinelAlarmCard extends HTMLElement {
 
     // cerceve rengi
     this._glow.classList.toggle("hot", hot);
-    this._glow.style.setProperty("--gl",
-      hot ? "rgba(255,60,90,.95)" : armedNow ? "rgba(255,70,95,.55)" : "rgba(60,220,140,.42)");
+    const pal = hot
+      ? ["#ff2d55", "#ff7a3d", "#ff2d55"]
+      : armedNow
+        ? ["#ff4d6d", "#ff9a3d", "#e0344f"]
+        : ["#5eeaa8", "#d4f56a", "#6fd9e8"];
+    this._glow.style.setProperty("--g1", pal[0]);
+    this._glow.style.setProperty("--g2", pal[1]);
+    this._glow.style.setProperty("--g3", pal[2]);
 
     /* ust satir */
     const top = ce("div", "top");
@@ -450,7 +485,19 @@ class SentinelAlarmCard extends HTMLElement {
       tabs.appendChild(t);
     }
     top.appendChild(tabs);
+
+    const exp = ce("div", "exp" + (this._open ? " open" : ""), "⌄");
+    exp.title = tr ? "Ayrıntıyı aç / kapat" : "Show / hide details";
+    exp.onclick = () => this._toggle();
+    top.appendChild(exp);
     this._root.appendChild(top);
+
+    /* Katlanan bolum: acilir-kapanir her sey burada. Durum satiri, mod
+       sekmeleri ve genislet dugmesi her zaman gorunur kalir. */
+    const fold = ce("div", "fold" + (this._open ? " open" : ""));
+    const foldin = ce("div", "foldin");
+    fold.appendChild(foldin);
+    this._fold = fold;
 
     /* oda hareket cizelgesi */
     const tl = ce("div", "tl");
@@ -476,7 +523,7 @@ class SentinelAlarmCard extends HTMLElement {
       this._tlAxis = ce("div", "tlaxis");
       tl.appendChild(this._tlAxis);
     }
-    this._root.appendChild(tl);
+    foldin.appendChild(tl);
     this._paintTimeline();
 
     /* alt: istatistikler + basili tut */
@@ -502,7 +549,7 @@ class SentinelAlarmCard extends HTMLElement {
     hold.appendChild(fill); hold.appendChild(lbl);
     this._wireHold(hold, fill, armedNow);
     foot.appendChild(hold);
-    this._root.appendChild(foot);
+    foldin.appendChild(foot);
 
     /* acik bolge notu */
     if ((a.open_now || []).length) {
@@ -510,7 +557,7 @@ class SentinelAlarmCard extends HTMLElement {
       n.appendChild(ce("span", null, "⚠"));
       n.appendChild(ce("span", null, (a.open_now || []).join(", ") + " — "
         + (tr ? "kurulumda bypass edilecek" : "will be bypassed on arming")));
-      this._root.appendChild(n);
+      foldin.appendChild(n);
     }
 
     /* son 12 saat */
@@ -534,7 +581,8 @@ class SentinelAlarmCard extends HTMLElement {
     strip.appendChild(this._bars);
     this._axis = ce("div", "axis");
     strip.appendChild(this._axis);
-    this._root.appendChild(strip);
+    foldin.appendChild(strip);
+    this._root.appendChild(fold);
     this._paintHistory();
 
     this._live();
