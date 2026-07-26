@@ -94,9 +94,81 @@ class SentinelAlarmCard extends HTMLElement {
   _T(map) { return this._tr() ? map.tr : map.en; }
 
   _svc(service, data) {
-    this._hass.callService("alarm_control_panel", service, {
+    return this._hass.callService("alarm_control_panel", service, {
       entity_id: this._entity, ...(data || {}),
     });
+  }
+
+  /* Kapatma. Entity `code_format` bildiriyorsa kod tanimlidir; once tus
+     takimini ac. Kod yoksa dogrudan kapat — kimseye bos bir kutu gosterme. */
+  _disarm() {
+    const st = this._hass && this._hass.states[this._entity];
+    if (!st || !st.attributes.code_format) { this._svc("alarm_disarm"); return; }
+    this._openPad();
+  }
+
+  _openPad() {
+    if (this._pad) return;
+    const tr = this._tr();
+    let code = "";
+
+    const pad = ce("div", "pad");
+    const box = ce("div", "padbox");
+    const ttl = ce("div", "padttl", tr ? "Alarm kodu" : "Alarm code");
+    const dots = ce("div", "dots");
+    const err = ce("div", "paderr");
+
+    const paint = () => {
+      dots.textContent = "";
+      for (let i = 0; i < Math.max(4, code.length); i++) {
+        dots.appendChild(ce("i", i < code.length ? "on" : null));
+      }
+    };
+
+    const close = () => { pad.remove(); this._pad = null; };
+
+    const submit = async () => {
+      if (!code) return;
+      err.textContent = "";
+      try {
+        await this._svc("alarm_disarm", { code });
+        close();
+      } catch (e) {
+        code = "";
+        paint();
+        err.textContent = tr ? "Kod hatali" : "Wrong code";
+        box.classList.remove("shake");
+        void box.offsetWidth;          // animasyonu yeniden tetikle
+        box.classList.add("shake");
+      }
+    };
+
+    const keys = ce("div", "keys");
+    for (const k of ["1","2","3","4","5","6","7","8","9","del","0","ok"]) {
+      const b = ce("div", "key" + (k === "ok" ? " ok" : k === "del" ? " del" : ""));
+      if (k === "del") b.appendChild(hicon("mdi:backspace-outline"));
+      else if (k === "ok") b.appendChild(hicon("mdi:lock-open-variant-outline"));
+      else b.textContent = k;
+      b.onclick = () => {
+        if (k === "del") { code = code.slice(0, -1); paint(); return; }
+        if (k === "ok") { submit(); return; }
+        if (code.length >= 12) return;
+        code += k; paint();
+        err.textContent = "";
+      };
+      keys.appendChild(b);
+    }
+
+    const cancel = ce("div", "padcancel", tr ? "Vazgec" : "Cancel");
+    cancel.onclick = close;
+
+    box.appendChild(ttl); box.appendChild(dots); box.appendChild(err);
+    box.appendChild(keys); box.appendChild(cancel);
+    pad.appendChild(box);
+    pad.onclick = (e) => { if (e.target === pad) close(); };
+    paint();
+    this._card.appendChild(pad);
+    this._pad = pad;
   }
   _openPanel() {
     history.pushState(null, "", "/sentinel-alarm");
@@ -134,7 +206,7 @@ class SentinelAlarmCard extends HTMLElement {
     const style = document.createElement("style");
     style.textContent = `
       :host{display:block;}
-      ha-card{background:#0c0a10;border-radius:18px;border:.5px solid #2a2530;overflow:hidden;
+      ha-card{position:relative;background:#0c0a10;border-radius:18px;border:.5px solid #2a2530;overflow:hidden;
         color:#fff;font-family:'Inter','Segoe UI',system-ui,sans-serif;}
       .wrap{padding:16px 16px 14px;}
       ha-icon{--mdc-icon-size:18px;display:inline-flex;vertical-align:middle;}
@@ -189,6 +261,28 @@ class SentinelAlarmCard extends HTMLElement {
       .feed .t{font-variant-numeric:tabular-nums;}
       .feed .hot{color:#ff9cb1;}
       .row2{display:flex;gap:6px;margin-bottom:12px;}
+
+      /* --- kod tus takimi --- */
+      .pad{position:absolute;inset:0;background:rgba(8,6,11,.86);backdrop-filter:blur(6px);
+        display:flex;align-items:center;justify-content:center;z-index:5;border-radius:18px;}
+      .padbox{width:min(232px,86%);padding:16px 16px 12px;border-radius:16px;
+        background:#120e17;border:.5px solid #2f2838;box-shadow:0 18px 40px rgba(0,0,0,.55);}
+      .padbox.shake{animation:sh .3s;}
+      @keyframes sh{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+      .padttl{font-size:11px;letter-spacing:.9px;text-transform:uppercase;color:#8d8299;text-align:center;}
+      .dots{display:flex;gap:7px;justify-content:center;margin:11px 0 4px;min-height:11px;}
+      .dots i{width:9px;height:9px;border-radius:50%;background:#2c2536;display:block;}
+      .dots i.on{background:linear-gradient(135deg,#ec4b88,#8b3dff);}
+      .paderr{min-height:13px;font-size:10.5px;color:#ff7d9c;text-align:center;margin-bottom:6px;}
+      .keys{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;}
+      .key{height:38px;border-radius:11px;background:#1a1522;border:.5px solid #2b2436;color:#e6dff0;
+        font-size:16px;display:flex;align-items:center;justify-content:center;cursor:pointer;
+        user-select:none;touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
+      .key:active{background:#241d30;}
+      .key.del{color:#9a8fae;}
+      .key.ok{background:linear-gradient(135deg,#ec4b88,#8b3dff);border-color:transparent;color:#fff;}
+      .padcancel{text-align:center;font-size:11px;color:#8d8299;margin-top:10px;cursor:pointer;
+        touch-action:manipulation;-webkit-tap-highlight-color:transparent;}
     `;
     this._root = ce("div", "wrap");
     const card = document.createElement("ha-card");
@@ -203,6 +297,7 @@ class SentinelAlarmCard extends HTMLElement {
     if (!this._built) this._build();
     const st = this._hass.states[this._entity];
     this._root.textContent = "";
+    if (this._pad) { this._pad.remove(); this._pad = null; }
     this._cd = null;
     this._roomEls = null;
 
@@ -360,7 +455,7 @@ class SentinelAlarmCard extends HTMLElement {
     const dis = ce("div", "disarm ghost");
     dis.appendChild(hicon("mdi:lock-open-variant-outline"));
     dis.appendChild(ce("span", null, tr ? "Devre dışı bırak" : "Disarm"));
-    dis.onclick = () => this._svc("alarm_disarm");
+    dis.onclick = () => this._disarm();
     this._root.appendChild(dis);
 
     // alt bilgi
@@ -402,7 +497,7 @@ class SentinelAlarmCard extends HTMLElement {
     const dis = ce("div", "disarm solid"); dis.style.flex = "1";
     dis.appendChild(hicon("mdi:lock-open-variant-outline"));
     dis.appendChild(ce("span", null, tr ? "Kapat" : "Disarm"));
-    dis.onclick = () => this._svc("alarm_disarm");
+    dis.onclick = () => this._disarm();
     row.appendChild(dis);
     const panel = ce("div", "disarm ghost");
     panel.style.flex = "0 0 auto";
