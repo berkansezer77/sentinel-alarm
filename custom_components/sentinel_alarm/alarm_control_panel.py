@@ -331,6 +331,10 @@ class SentinelAlarmPanel(AlarmControlPanelEntity, RestoreEntity):
         self._trigger_source = ""
         self._changed_by = "panel"
         self._bad_code = 0
+        # Çıkış süresi bittiğinde tekrar bakacağız; kullanıcı burada bilerek
+        # baypas ettiyse orada da baypas edelim, yoksa kendi isteğini geri almış
+        # oluruz.
+        self._bypass_open = bypass_open
 
         exit_delay = self._engine.timings(mode)["exit"]
         if exit_delay > 0:
@@ -350,6 +354,29 @@ class SentinelAlarmPanel(AlarmControlPanelEntity, RestoreEntity):
         self._t_exit = None
         self._phase = ""
         self._ends_at = None
+
+        # Çıkışta bir kapı açık bırakıldıysa kurma. `_start_watching` yalnızca
+        # bundan sonraki durum değişimlerine abone olur, o yüzden hâlihazırda
+        # açık duran bir kapı hiç kapanıp açılmazsa alarmı tetiklemezdi: sistem
+        # kurulu görünür ama o kapıyı korumazdı. Sessizce baypas etmektense
+        # kurmayı bırakıp haber vermek daha dürüst.
+        if not getattr(self, "_bypass_open", False):
+            blocked = self._engine.blocked_sensors(self._mode)
+            if blocked:
+                names = ", ".join(self._engine.name_of(e) for e in blocked)
+                text = self._engine.msg("exit_fault", names)
+                mode = self._mode
+                self._engine.log("blocked", text, mode)
+                self._mode = ""
+                self._state = AlarmControlPanelState.DISARMED
+                self._engine.stop_beeps()
+                self._engine.cancel_actions()
+                if self._engine.config.get("warn_on_blocked", True):
+                    self.hass.async_create_task(self._engine.async_tts(text))
+                    self.hass.async_create_task(self._engine.async_notify(text))
+                self.async_write_ha_state()
+                return
+
         self._state = ARMED_STATE.get(self._mode, AlarmControlPanelState.ARMED_AWAY)
         self._start_watching()
         if self._mode == "vacation":

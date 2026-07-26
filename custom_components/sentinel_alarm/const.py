@@ -7,7 +7,7 @@ FRONTEND_URL_BASE = "/sentinel_alarm_frontend"
 
 # Bump on every frontend change — the version lives in the FILE NAME (not ?v=)
 # so service workers / browser caches are forced to fetch the fresh file.
-FRONTEND_VERSION = "1.13.1"
+FRONTEND_VERSION = "1.14.0"
 
 # Lovelace custom card ships with the integration; version lives in the file
 # name so browser caches fetch the fresh file after an update.

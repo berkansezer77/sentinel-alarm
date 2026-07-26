@@ -65,6 +65,10 @@ MSG = {
         "en": "Alarm could not be armed. {n} open.",
         "tr": "Alarm kurulamadı. {n} açık.",
     },
+    "exit_fault": {
+        "en": "Alarm NOT armed — {n} still open when the exit delay ran out.",
+        "tr": "Alarm KURULMADI — çıkış süresi bittiğinde {n} hâlâ açıktı.",
+    },
     "triggered": {
         "en": "Alarm triggered! {n}",
         "tr": "Alarm tetiklendi! {n}",

@@ -185,14 +185,10 @@ class SentinelActionView(HomeAssistantView):
                     return self.json_message("Unknown mode", status_code=400)
                 await entity.async_arm_mode(mode, bool(body.get("bypass")))
             elif action == "disarm":
-                # Kodu isteği yapan verir; doğrulamayı entity yapar. Bu uç artık
-                # yönetici istiyor ve yönetici kodu ayarlarda zaten görebiliyor,
-                # bu yüzden kod göndermediyse geçmesine izin veriyoruz. Kod
-                # koruması ev halkı içindir ve kart üzerinden işler — kart
-                # `alarm_control_panel.alarm_disarm` çağırır, kodu oraya yazar.
-                await entity.async_alarm_disarm(
-                    body.get("code") or self._engine.config.get("code") or None
-                )
+                # Kodu isteği yapan verir, doğrulamayı entity yapar. Saklanan
+                # kodu buradan geçirmek — yönetici onu zaten görebiliyor olsa
+                # da — kod korumasını bu uç için tamamen sözde bırakırdı.
+                await entity.async_alarm_disarm(body.get("code") or None)
             elif action == "test_sound":
                 await self._engine.async_siren(True)
             elif action == "stop_sound":

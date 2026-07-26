@@ -86,6 +86,7 @@ const I18N = {
   st_unknown:   { en: "Not ready", tr: "Hazır değil" },
   status_h:     { en: "Status", tr: "Durum" },
   disarm:       { en: "Disarm", tr: "Devre dışı bırak" },
+  code_prompt:  { en: "Alarm code", tr: "Alarm kodu" },
   arm_as:       { en: "Arm as", tr: "Şu modda kur" },
   watched:      { en: "watched", tr: "izlenen" },
   open_now:     { en: "open", tr: "açık" },
@@ -859,6 +860,17 @@ class SentinelAlarmPanel extends HTMLElement {
         .then(() => this._flash(this.T("saved")))
         .catch(() => this._flash(this.T("save_err"), true));
     }, 400);
+  }
+
+  /* Kapatma. Kod tanimliysa sor — panel yonetici sayfasi olsa da saklanan
+     kodu sessizce gecmek, kod korumasini bu uc icin sozde birakirdi. */
+  _disarmAsk() {
+    const st = this._hass && this._hass.states["alarm_control_panel.sentinel_alarm"];
+    const needs = st && st.attributes && st.attributes.code_format;
+    if (!needs) { this._action({ action: "disarm" }); return; }
+    const code = window.prompt(this.T("code_prompt"));
+    if (code === null || code === "") return;
+    this._action({ action: "disarm", code });
   }
 
   async _action(body) {
@@ -2333,7 +2345,7 @@ class SentinelAlarmPanel extends HTMLElement {
     const dis = el("div", "pick" + (state === "disarmed" ? " on" : ""));
     dis.appendChild(icon("mdi:lock-open-variant-outline"));
     dis.appendChild(el("span", null, esc(this.T("disarm"))));
-    dis.onclick = () => this._action({ action: "disarm" });
+    dis.onclick = () => this._disarmAsk();
     picks.appendChild(dis);
     for (const m of MODES) {
       const p = el("div", "pick" + (mode === m.key && state !== "disarmed" ? " on" : ""));
