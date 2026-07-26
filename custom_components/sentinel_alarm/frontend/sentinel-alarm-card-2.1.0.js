@@ -29,7 +29,9 @@ const CARD_STATE = {
 };
 
 const ARMED = ["armed_home", "armed_away", "armed_night", "armed_vacation"];
-const SLOTS = 36;                 // 12 saat / 36 = 20'şer dakika
+const SLOTS = 36;                 // alt serit: 12 saat / 36 = 20'ser dakika
+const TL_HOURS = 6;               // oda cizelgesi: son kac saat
+const TL_MERGE = 120000;          // bu araliktaki tetiklemeler tek hareket
 
 function ce(tag, cls, text) {
   const e = document.createElement(tag);
@@ -58,7 +60,7 @@ class SentinelAlarmCard extends HTMLElement {
     if (st === this._lastSt) { this._live(); return; }
     this._lastSt = st;
     this._render();
-    if (first) this._loadHistory();
+    if (first) { this._loadHistory(); this._loadTimeline(); }
   }
 
   connectedCallback() { this._startTick(); }
@@ -153,6 +155,126 @@ class SentinelAlarmCard extends HTMLElement {
     this._paintHistory();
   }
 
+  /* Odaların son TL_HOURS saatlik hareketi. Tek history isteğinde bütün
+     sensörleri alıp odalara dağıtıyoruz — sensör başına istek atmak on üç
+     çağrı ederdi. Sadece "off -> on" anları çizgi olur; süre değil, olay
+     gösteriyoruz. */
+  async _loadTimeline() {
+    if (!this._hass) return;
+    const st = this._hass.states[this._entity];
+    const rooms = (st && st.attributes.room_sensors) || {};
+    const all = [];
+    for (const list of Object.values(rooms)) for (const e of list) all.push(e);
+    if (!all.length) { this._tl = null; return; }
+
+    const end = new Date();
+    const start = new Date(end.getTime() - TL_HOURS * 3600 * 1000);
+    let res;
+    try {
+      const url = `history/period/${start.toISOString()}`
+        + `?filter_entity_id=${all.join(",")}&minimal_response&no_attributes`
+        + `&end_time=${end.toISOString()}`;
+      res = await this._hass.callApi("GET", url);
+    } catch (e) {
+      this._tl = null;
+      return;
+    }
+
+    const hits = {};                       // entity -> [zaman...]
+    for (const series of res || []) {
+      if (!series || !series.length) continue;
+      const eid = series[0].entity_id;
+      const out = [];
+      let prev = null;
+      for (const row of series) {
+        const v = row.state;
+        if (v === "on" && prev !== "on") {
+          out.push(new Date(row.last_changed || row.last_updated).getTime());
+        }
+        prev = v;
+      }
+      hits[eid] = out;
+    }
+
+    const byRoom = {};
+    let total = 0;
+    for (const [nm, list] of Object.entries(rooms)) {
+      const t = [];
+      for (const e of list) for (const ts of hits[e] || []) t.push(ts);
+      t.sort((x, y) => x - y);
+      // Odada dolasan bir kisi sensoru arka arkaya onlarca kez tetikler; bunlar
+      // tek bir hareket. Yoksa yogun bir oda tek bir turuncu blok olur.
+      const merged = [];
+      for (const ts of t) {
+        if (!merged.length || ts - merged[merged.length - 1] > TL_MERGE) merged.push(ts);
+      }
+      byRoom[nm] = merged;
+      total += merged.length;
+    }
+
+    // aynı istekten alarmın kurulu olduğu aralıklar da lazım (üstteki bantlar)
+    let bands = [];
+    try {
+      const url2 = `history/period/${start.toISOString()}`
+        + `?filter_entity_id=${this._entity}&minimal_response&no_attributes`
+        + `&end_time=${end.toISOString()}`;
+      const r2 = await this._hass.callApi("GET", url2);
+      const rows = (r2 && r2[0]) || [];
+      for (let i = 0; i < rows.length; i++) {
+        const v = rows[i].state;
+        if (!(ARMED.includes(v) || v === "arming" || v === "triggered")) continue;
+        const from = new Date(rows[i].last_changed || rows[i].last_updated).getTime();
+        const to = i + 1 < rows.length
+          ? new Date(rows[i + 1].last_changed || rows[i + 1].last_updated).getTime()
+          : end.getTime();
+        bands.push([from, to]);
+      }
+    } catch (e) { /* bant olmasa da cizelge calisir */ }
+
+    this._tl = { byRoom, bands, start, end, total };
+    this._paintTimeline();
+  }
+
+  _paintTimeline() {
+    if (!this._tl || !this._laneEls) return;
+    const { byRoom, bands, start, end, total } = this._tl;
+    const span = end.getTime() - start.getTime();
+    const pct = (t) => ((t - start.getTime()) / span) * 100;
+
+    for (const [nm, lane] of Object.entries(this._laneEls)) {
+      lane.textContent = "";
+      for (const ts of byRoom[nm] || []) {
+        const i = ce("i");
+        i.style.left = `${Math.min(99.7, Math.max(0, pct(ts)))}%`;
+        lane.appendChild(i);
+      }
+    }
+    if (this._armBar) {
+      this._armBar.textContent = "";
+      for (const [f, t] of bands || []) {
+        const b = ce("i");
+        const l = Math.max(0, pct(f));
+        b.style.left = `${l}%`;
+        b.style.width = `${Math.max(0.6, Math.min(100 - l, pct(t) - l))}%`;
+        this._armBar.appendChild(b);
+      }
+    }
+    if (this._tlAxis) {
+      this._tlAxis.textContent = "";
+      for (let i = 0; i <= TL_HOURS; i++) {
+        const d = new Date(start.getTime() + (span * i) / TL_HOURS);
+        this._tlAxis.appendChild(ce("span", null,
+          `${String(d.getHours()).padStart(2, "0")}:00`));
+      }
+    }
+    if (this._sub) {
+      const tr = this._tr();
+      this._sub.textContent = tr
+        ? `Son ${TL_HOURS} saat · ${total} olay`
+        : `Last ${TL_HOURS}h · ${total} events`;
+    }
+  }
+
   /* --------------------------------------------------------------- kurgu */
 
   _build() {
@@ -189,29 +311,40 @@ class SentinelAlarmCard extends HTMLElement {
         white-space:nowrap;}
       .tab.on{background:#20192b;color:#fff;}
 
-      .body{display:grid;grid-template-columns:1fr 190px;gap:14px;}
-      @media (max-width:520px){.body{grid-template-columns:1fr;}}
+      .sub{font-size:10px;letter-spacing:1.5px;color:#6f6779;text-transform:uppercase;
+        align-self:center;}
 
-      .plan{background:#0e0b13;border:.5px solid #211c29;border-radius:16px;padding:12px;
-        display:grid;grid-template-columns:repeat(3,1fr);grid-auto-rows:11px;gap:9px;}
-      .room{border:.5px solid #262030;border-radius:11px;background:#120e18;padding:9px 10px;
-        position:relative;overflow:hidden;transition:border-color .25s,background .25s;}
-      .room .nm{font-size:12px;color:#9a91a6;}
-      .room .dot{position:absolute;right:9px;top:10px;width:7px;height:7px;border-radius:50%;
-        background:#3a3346;transition:background .25s,box-shadow .25s;}
-      .room.act{border-color:#ffb86b6b;background:#181109;}
-      .room.act .nm{color:#ffb86b;}
-      .room.act .dot{background:#ffb86b;box-shadow:0 0 9px #ffb86b;}
+      /* --- oda hareket cizelgesi --- */
+      .tl{border-top:.5px solid #1d1825;border-bottom:.5px solid #1d1825;
+        padding:12px 0 8px;margin-bottom:14px;}
+      .tlarm{height:6px;position:relative;margin:0 0 9px 78px;}
+      .tlarm i{position:absolute;top:0;height:6px;border-radius:3px;background:#8a6a2e;}
+      .row{display:flex;align-items:center;height:22px;}
+      .row .nm{width:78px;flex:0 0 78px;font-size:11.5px;color:#6f6779;
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:8px;}
+      .row.act .nm{color:#ffb86b;}
+      .lane{flex:1;position:relative;height:22px;
+        background:linear-gradient(to right,#16121d 1px,transparent 1px) repeat-x;
+        background-size:calc(100% / var(--h, 6)) 100%;}
+      .lane i{position:absolute;top:4px;width:2px;height:14px;border-radius:1px;
+        background:#3d3648;}
+      .row.act .lane i{background:#ffb86b;box-shadow:0 0 6px #ffb86b80;width:3px;}
+      .tlaxis{display:flex;justify-content:space-between;margin:6px 0 0 78px;
+        font-size:9.5px;color:#5d5668;font-variant-numeric:tabular-nums;}
+      .tlempty{margin-left:78px;font-size:11.5px;color:#5d5668;padding:14px 0;}
 
-      .side{display:flex;flex-direction:column;gap:8px;}
+      /* --- alt: istatistikler + basili tut --- */
+      .foot{display:grid;grid-template-columns:repeat(3,1fr) 200px;gap:8px;align-items:stretch;}
+      @media (max-width:620px){.foot{grid-template-columns:1fr 1fr;}}
       .stat{background:#0e0b13;border:.5px solid #211c29;border-radius:12px;
         padding:11px 13px;display:flex;align-items:center;justify-content:space-between;}
       .stat .k{font-size:10px;letter-spacing:1.2px;color:#7d7489;text-transform:uppercase;}
       .stat .v{font-size:15px;font-variant-numeric:tabular-nums;font-weight:600;}
       .stat .v.hi{color:#ffb86b;}
-      .hold{margin-top:auto;border-radius:13px;border:.5px solid #2b2436;background:#141019;
-        padding:15px 10px;text-align:center;font-size:13.5px;cursor:pointer;user-select:none;
-        position:relative;overflow:hidden;touch-action:manipulation;
+      .hold{border-radius:12px;border:.5px solid #2b2436;background:#141019;
+        padding:11px 10px;text-align:center;font-size:13px;cursor:pointer;user-select:none;
+        position:relative;overflow:hidden;display:flex;align-items:center;
+        justify-content:center;touch-action:manipulation;
         -webkit-tap-highlight-color:transparent;}
       .hold .fill{position:absolute;left:0;top:0;bottom:0;width:0;background:#ffffff14;}
       .hold .lbl{position:relative;}
@@ -294,6 +427,8 @@ class SentinelAlarmCard extends HTMLElement {
     /* ust satir */
     const top = ce("div", "top");
     top.appendChild(ce("div", "state", this._T(CARD_STATE[state] || CARD_STATE.unavailable)));
+    this._sub = ce("div", "sub", "");
+    top.appendChild(this._sub);
     const modeKey = a.mode || (this._pick || "");
     const md = CARD_MODES.find((m) => m.key === (modeKey || this._pick || "away"));
     if (md) {
@@ -317,43 +452,47 @@ class SentinelAlarmCard extends HTMLElement {
     top.appendChild(tabs);
     this._root.appendChild(top);
 
-    /* govde: kat plani + sag sutun */
-    const body = ce("div", "body");
-
-    const plan = ce("div", "plan");
+    /* oda hareket cizelgesi */
+    const tl = ce("div", "tl");
     const rooms = a.room_sensors || {};
     const names = Object.keys(rooms);
     this._roomEls = [];
-    names.forEach((nm, i) => {
-      const r = ce("div", "room");
-      r.style.gridRow = `span ${SPANS[i % SPANS.length]}`;
-      r.appendChild(ce("div", "nm", nm));
-      r.appendChild(ce("div", "dot"));
-      plan.appendChild(r);
-      this._roomEls.push({ el: r, eids: rooms[nm] || [] });
-    });
+    this._laneEls = {};
     if (!names.length) {
-      const empty = ce("div", "room");
-      empty.style.gridColumn = "span 3";
-      empty.style.gridRow = "span 6";
-      empty.appendChild(ce("div", "nm", tr ? "Henüz bölge yok" : "No zones yet"));
-      plan.appendChild(empty);
+      tl.appendChild(ce("div", "tlempty", tr ? "Henüz bölge yok" : "No zones yet"));
+    } else {
+      this._armBar = ce("div", "tlarm");
+      tl.appendChild(this._armBar);
+      for (const nm of names) {
+        const row = ce("div", "row");
+        row.appendChild(ce("div", "nm", nm));
+        const lane = ce("div", "lane");
+        lane.style.setProperty("--h", String(TL_HOURS));
+        row.appendChild(lane);
+        tl.appendChild(row);
+        this._roomEls.push({ el: row, eids: rooms[nm] || [] });
+        this._laneEls[nm] = lane;
+      }
+      this._tlAxis = ce("div", "tlaxis");
+      tl.appendChild(this._tlAxis);
     }
-    body.appendChild(plan);
+    this._root.appendChild(tl);
+    this._paintTimeline();
 
-    const side = ce("div", "side");
+    /* alt: istatistikler + basili tut */
+    const foot = ce("div", "foot");
     const mkStat = (k, v, hi) => {
-      const s = ce("div", "stat");
-      s.appendChild(ce("div", "k", k));
+      const s2 = ce("div", "stat");
+      s2.appendChild(ce("div", "k", k));
       const val = ce("div", "v" + (hi ? " hi" : ""), v);
-      s.appendChild(val);
-      return { box: s, val };
+      s2.appendChild(val);
+      return { box: s2, val };
     };
     const openS = mkStat(tr ? "Açık bölge" : "Open", String(a.open_count || 0), (a.open_count || 0) > 0);
     const watchS = mkStat(tr ? "İzlenen" : "Watched", String(a.watched || 0));
     const timeS = mkStat(tr ? "Süre" : "Time", this._clock());
     this._openV = openS.val; this._watchV = watchS.val; this._timeV = timeS.val;
-    side.appendChild(openS.box); side.appendChild(watchS.box); side.appendChild(timeS.box);
+    foot.appendChild(openS.box); foot.appendChild(watchS.box); foot.appendChild(timeS.box);
 
     const hold = ce("div", "hold");
     const fill = ce("div", "fill");
@@ -362,9 +501,8 @@ class SentinelAlarmCard extends HTMLElement {
                : (tr ? "Basılı tut → Kur" : "Hold → Arm"));
     hold.appendChild(fill); hold.appendChild(lbl);
     this._wireHold(hold, fill, armedNow);
-    side.appendChild(hold);
-    body.appendChild(side);
-    this._root.appendChild(body);
+    foot.appendChild(hold);
+    this._root.appendChild(foot);
 
     /* acik bolge notu */
     if ((a.open_now || []).length) {
@@ -423,6 +561,12 @@ class SentinelAlarmCard extends HTMLElement {
      basili tut animasyonunu ve tus takimini bozardi. */
   _live() {
     if (!this._hass || !this._built) return;
+    // Cizelgeyi dakikada bir tazele: yeni hareketler kendiliginden dussun.
+    const now = Date.now();
+    if (!this._tlAt || now - this._tlAt > 60000) {
+      this._tlAt = now;
+      this._loadTimeline();
+    }
     const st = this._hass.states[this._entity];
     if (!st) return;
     const a = st.attributes || {};
