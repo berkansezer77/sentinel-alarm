@@ -16,11 +16,12 @@ import io
 import logging
 import os
 import random
+import secrets
 import struct
 import wave
 from datetime import datetime, timedelta
 
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import Context, HomeAssistant, callback
 from homeassistant.helpers import aiohttp_client
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import (
@@ -167,6 +168,9 @@ class SentinelEngine:
         self.progress: dict = {"running": False}
         self.last_run: dict = {}
         self.runs: list[dict] = []      # eylem günlüğü (son çalışmalar)
+        # Panelden elle çalıştırılan zincirin sahibi — serbest `service`
+        # adımı onun adına çağrılsın ki HA'nın izin kontrolü devreye girsin.
+        self._step_ctx: Context | None = None
         # Otomatik kurulum + geri sayım bipleri
         self._auto_unsubs: list = []
         self._leave_timer = None
@@ -702,7 +706,12 @@ class SentinelEngine:
         stamp = dt_util.now().strftime("%H%M%S")
         shots: list[dict] = []
         for cam in cams:
-            fname = f"{slugify(cam)}_{stamp}.jpg"
+            # Dosyalar `www/` altında duruyor, yani `/local/...` adresinden
+            # kimlik doğrulaması olmadan sunuluyorlar — Home Assistant'ın
+            # kuralı bu. Kamera adı + saat tahmin edilebilir bir isim yapardı
+            # (günde 86400 olasılık), o yüzden adın sonuna tahmin edilemez bir
+            # belirteç ekliyoruz: adresi bilmeyen görüntüye ulaşamasın.
+            fname = f"{slugify(cam)}_{stamp}_{secrets.token_urlsafe(12)}.jpg"
             path = os.path.join(folder, fname)
             try:
                 await self.hass.services.async_call(
@@ -1161,16 +1170,32 @@ class SentinelEngine:
         return assigned[0] if assigned else ""
 
     @callback
-    def run_step_list(self, steps: list[dict]) -> None:
+    def run_step_list(self, steps: list[dict], context: Context | None = None) -> None:
         """Run steps handed in directly — nothing is read from or written to the
-        saved configuration. This is what the panel's per-step test uses."""
+        saved configuration. This is what the panel's per-step test uses.
+
+        `context` is the caller's Home Assistant context. A free-form `service`
+        step can call anything, so it is dispatched on behalf of the user who
+        asked for it rather than anonymously.
+        """
         if not steps:
             return
         # Testte gerçek tetik yok; temsili bir sensör ver ki oda/sensör dolsun.
         self._action_eid = self.sample_trigger_eid()
         self._action_mode = "away"
         self.cancel_actions()
-        self._action_task = self.hass.async_create_task(self._run_steps(steps, "test"))
+        self._action_task = self.hass.async_create_task(
+            self._run_steps_as(steps, "test", context)
+        )
+
+    async def _run_steps_as(self, steps: list[dict], key: str,
+                            context: Context | None) -> None:
+        """Run a chain with the caller's context attached to service steps."""
+        self._step_ctx = context
+        try:
+            await self._run_steps(steps, key)
+        finally:
+            self._step_ctx = None
 
     @callback
     def run_actions(self, key: str, eid: str = "", mode: str = "") -> None:
@@ -1489,7 +1514,10 @@ class SentinelEngine:
                 data = dict(step.get("data") or {})
                 if ents:
                     data["entity_id"] = ents
-                await self._call(domain, service, data)
+                # Bu adım herhangi bir servisi çağırabilir. Panelden elle
+                # çalıştırıldıysa isteği yapanın context'iyle git — böylece
+                # çağrı HA'nın kendi izin kontrolünden geçer.
+                await self._call(domain, service, data, context=self._step_ctx)
             return
 
     async def _flash_native(self, ents: list[str], data: dict, duration: float) -> None:
@@ -1571,9 +1599,11 @@ class SentinelEngine:
                 await asyncio.sleep(gap)
 
     async def _call(self, domain: str, service: str, data: dict,
-                    blocking: bool = False) -> None:
+                    blocking: bool = False, context: Context | None = None) -> None:
         try:
-            await self.hass.services.async_call(domain, service, data, blocking=blocking)
+            await self.hass.services.async_call(
+                domain, service, data, blocking=blocking, context=context
+            )
         except Exception as err:  # noqa: BLE001
             _LOGGER.warning("Sentinel: %s.%s failed: %s", domain, service, err)
 

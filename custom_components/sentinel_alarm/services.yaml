@@ -20,3 +20,12 @@ arm:
       default: false
       selector:
         boolean:
+    code:
+      name: Code
+      description: >-
+        The disarm code, if one is set. Required to disarm; ignored when no code
+        is configured.
+      required: false
+      example: "1234"
+      selector:
+        text:

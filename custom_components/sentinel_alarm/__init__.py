@@ -41,6 +41,17 @@ from .engine import SentinelEngine
 _LOGGER = logging.getLogger(__name__)
 
 
+def _is_admin(request) -> bool:
+    """Yalnızca yönetici.
+
+    Panel ayarları alarm kodunu ve TTS anahtarlarını taşır, `run_steps` ise
+    serbest servis çağrısı yapabilir. `requires_auth` tek başına yetmez —
+    o sadece "giriş yapmış biri" demek. Burada yöneticiyi şart koşuyoruz.
+    """
+    user = request.get("hass_user")
+    return bool(user and user.is_admin)
+
+
 class SentinelConfigView(HomeAssistantView):
     """Read/write the panel configuration (JSON, session required)."""
 
@@ -52,9 +63,13 @@ class SentinelConfigView(HomeAssistantView):
         self._engine = engine
 
     async def get(self, request):
+        if not _is_admin(request):
+            return self.json_message("Admin required", status_code=403)
         return self.json(self._engine.config)
 
     async def post(self, request):
+        if not _is_admin(request):
+            return self.json_message("Admin required", status_code=403)
         try:
             body = await request.json()
         except ValueError:
@@ -79,6 +94,8 @@ class SentinelEventsView(HomeAssistantView):
         self._engine = engine
 
     async def get(self, request):
+        if not _is_admin(request):
+            return self.json_message("Admin required", status_code=403)
         # Panel bunu düzenli okuyor; ilerlemeyi de buraya koyarsak ayrı istek
         # gerekmez. `elapsed` monotonik saatten hesaplanır.
         engine = self._engine
@@ -99,6 +116,8 @@ class SentinelEventsView(HomeAssistantView):
         })
 
     async def delete(self, request):
+        if not _is_admin(request):
+            return self.json_message("Admin required", status_code=403)
         self._engine.events.clear()
         await self._engine.events_store.async_save({"events": []})
         return self.json({"ok": True})
@@ -115,9 +134,13 @@ class SentinelBackupView(HomeAssistantView):
         self._engine = engine
 
     async def get(self, request):
+        if not _is_admin(request):
+            return self.json_message("Admin required", status_code=403)
         return self.json({"backups": self._engine.backup_list()})
 
     async def post(self, request):
+        if not _is_admin(request):
+            return self.json_message("Admin required", status_code=403)
         try:
             body = await request.json()
         except ValueError:
@@ -143,6 +166,8 @@ class SentinelActionView(HomeAssistantView):
         self._engine = engine
 
     async def post(self, request):
+        if not _is_admin(request):
+            return self.json_message("Admin required", status_code=403)
         try:
             body = await request.json()
         except ValueError:
@@ -159,7 +184,14 @@ class SentinelActionView(HomeAssistantView):
                     return self.json_message("Unknown mode", status_code=400)
                 await entity.async_arm_mode(mode, bool(body.get("bypass")))
             elif action == "disarm":
-                await entity.async_alarm_disarm(self._engine.config.get("code") or None)
+                # Kodu isteği yapan verir; doğrulamayı entity yapar. Bu uç artık
+                # yönetici istiyor ve yönetici kodu ayarlarda zaten görebiliyor,
+                # bu yüzden kod göndermediyse geçmesine izin veriyoruz. Kod
+                # koruması ev halkı içindir ve kart üzerinden işler — kart
+                # `alarm_control_panel.alarm_disarm` çağırır, kodu oraya yazar.
+                await entity.async_alarm_disarm(
+                    body.get("code") or self._engine.config.get("code") or None
+                )
             elif action == "test_sound":
                 await self._engine.async_siren(True)
             elif action == "stop_sound":
@@ -179,7 +211,9 @@ class SentinelActionView(HomeAssistantView):
                 steps = body.get("steps")
                 if not isinstance(steps, list):
                     return self.json_message("steps must be a list", status_code=400)
-                self._engine.run_step_list(steps)
+                # İsteği yapanın context'i: serbest `service` adımı onun adına
+                # çağrılsın, anonim değil.
+                self._engine.run_step_list(steps, context=self.context(request))
             elif action == "stop_actions":
                 self._engine.cancel_actions()
             elif action == "test_notify":
@@ -251,10 +285,14 @@ class SentinelMediaView(HomeAssistantView):
         return found
 
     async def get(self, request):
+        if not _is_admin(request):
+            return self.json_message("Admin required", status_code=403)
         files = await self._hass.async_add_executor_job(self._scan)
         return self.json({"files": files})
 
     async def post(self, request):
+        if not _is_admin(request):
+            return self.json_message("Admin required", status_code=403)
         """Accept a dropped audio file and store it under www/sentinel."""
         try:
             data = await request.post()
@@ -340,7 +378,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 module_url=f"{FRONTEND_URL_BASE}/sentinel-alarm-panel-{FRONTEND_VERSION}.js",
                 sidebar_title="Sentinel",
                 sidebar_icon="mdi:shield-home",
-                require_admin=False,
+                # Panel, alarm kodunu ve TTS anahtarlarını gösterir; yalnızca
+                # yöneticiler görsün. Ev halkı alarmı karttan kurar/kapatır.
+                require_admin=True,
             )
         except ValueError:
             pass  # already registered (entry reload)
@@ -393,7 +433,11 @@ def _register_services(hass: HomeAssistant, engine: SentinelEngine) -> None:
         entity = engine.entity
         if entity is None:
             raise RuntimeError("Sentinel Alarm entity is not ready yet")
-        await entity.async_arm_mode(call.data["mode"], call.data.get("bypass_open", False))
+        await entity.async_arm_mode(
+            call.data["mode"],
+            call.data.get("bypass_open", False),
+            code=call.data.get("code"),
+        )
 
     hass.services.async_register(
         DOMAIN,
@@ -403,6 +447,7 @@ def _register_services(hass: HomeAssistant, engine: SentinelEngine) -> None:
             {
                 vol.Required("mode"): vol.In(MODES + ["disarm"]),
                 vol.Optional("bypass_open", default=False): cv.boolean,
+                vol.Optional("code"): cv.string,
             }
         ),
     )

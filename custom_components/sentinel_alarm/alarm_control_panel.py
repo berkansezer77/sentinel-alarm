@@ -299,12 +299,18 @@ class SentinelAlarmPanel(AlarmControlPanelEntity, RestoreEntity):
     async def async_alarm_arm_vacation(self, code: str | None = None) -> None:
         await self._async_arm("vacation", code)
 
-    async def async_arm_mode(self, mode: str, bypass_open: bool = False) -> None:
-        """Entry point used by the panel / sentinel_alarm.arm service."""
+    async def async_arm_mode(self, mode: str, bypass_open: bool = False,
+                             code: str | None = None) -> None:
+        """Entry point used by the panel / sentinel_alarm.arm service.
+
+        `code` is whatever the caller supplied. It is passed through so the
+        usual check applies; handing over the stored code here would make the
+        code protection meaningless for anyone able to call the service.
+        """
         if mode == "disarm":
-            await self.async_alarm_disarm(self._engine.config.get("code") or None)
+            await self.async_alarm_disarm(code)
             return
-        await self._async_arm(mode, None, bypass_open=bypass_open)
+        await self._async_arm(mode, code, bypass_open=bypass_open)
 
     async def _async_arm(self, mode: str, code: str | None, bypass_open: bool = False) -> None:
         if self._engine.config.get("code") and self.code_arm_required:

@@ -146,7 +146,7 @@ The card is registered as a Lovelace resource automatically. Add it to a dashboa
 
 ```yaml
 type: custom:sentinel-alarm-card
-entity: alarm_control_panel.sentinel
+entity: alarm_control_panel.sentinel_alarm
 ```
 
 ## Requirements
