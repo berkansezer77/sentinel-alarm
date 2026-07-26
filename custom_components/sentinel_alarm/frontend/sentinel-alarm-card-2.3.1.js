@@ -364,8 +364,12 @@ class SentinelAlarmCard extends HTMLElement {
       /* --- oda hareket cizelgesi --- */
       .tl{border-top:.5px solid #1d1825;border-bottom:.5px solid #1d1825;
         padding:12px 0 8px;margin-bottom:14px;}
+      .tlhd{display:flex;align-items:center;gap:10px;margin:0 0 7px 78px;flex-wrap:wrap;}
+      .tlhd .lg{display:flex;align-items:center;gap:6px;font-size:9px;letter-spacing:1.1px;
+        color:#5d5668;text-transform:uppercase;white-space:nowrap;}
+      .tlhd .lg i{width:12px;height:4px;border-radius:2px;display:block;}
       .tlarm{height:6px;position:relative;margin:0 0 9px 78px;}
-      .tlarm i{position:absolute;top:0;height:6px;border-radius:3px;background:#8a6a2e;}
+      .tlarm i{position:absolute;top:0;height:6px;border-radius:3px;background:#c98f2e;}
       .row{display:flex;align-items:center;height:22px;}
       .row .nm{width:78px;flex:0 0 78px;font-size:11.5px;color:#6f6779;
         white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:8px;}
@@ -393,9 +397,9 @@ class SentinelAlarmCard extends HTMLElement {
         .foot{grid-template-columns:1fr 1fr;}
       }
       .stat{background:#0e0b13;border:.5px solid #211c29;border-radius:12px;
-        padding:10px 13px 11px;display:flex;flex-direction:column;gap:6px;min-width:0;}
-      .stat .k{font-size:9.5px;letter-spacing:1.3px;color:#7d7489;text-transform:uppercase;
-        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+        padding:10px 11px 11px;display:flex;flex-direction:column;gap:6px;min-width:0;}
+      .stat .k{font-size:9px;letter-spacing:.9px;color:#7d7489;text-transform:uppercase;
+        white-space:nowrap;}
       .stat .v{font-size:18px;font-variant-numeric:tabular-nums;font-weight:600;line-height:1;}
       .stat .v.hi{color:#ffb86b;}
       .hold{border-radius:12px;border:.5px solid #2b2436;background:#141019;
@@ -545,6 +549,17 @@ class SentinelAlarmCard extends HTMLElement {
     if (!names.length) {
       tl.appendChild(ce("div", "tlempty", tr ? "Henüz bölge yok" : "No zones yet"));
     } else {
+      // Bantlarin ne oldugu yazmazsa kimse bilemez — kucuk bir lejant.
+      const tlhd = ce("div", "tlhd");
+      const lgi = (col, txt) => {
+        const x = ce("div", "lg");
+        const i = ce("i"); i.style.background = col;
+        x.appendChild(i); x.appendChild(ce("span", null, txt));
+        return x;
+      };
+      tlhd.appendChild(lgi("#c98f2e", tr ? "Alarm kuruluydu" : "Alarm was armed"));
+      tlhd.appendChild(lgi("#ffb86b", tr ? "Hareket" : "Movement"));
+      tl.appendChild(tlhd);
       this._armBar = ce("div", "tlarm");
       tl.appendChild(this._armBar);
       for (const nm of names) {

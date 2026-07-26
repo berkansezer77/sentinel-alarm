@@ -11,7 +11,7 @@ FRONTEND_VERSION = "1.15.0"
 
 # Lovelace custom card ships with the integration; version lives in the file
 # name so browser caches fetch the fresh file after an update.
-CARD_VERSION = "2.3.0"
+CARD_VERSION = "2.3.1"
 
 STORE_VERSION = 1
 STORE_KEY = "sentinel_alarm_config"
