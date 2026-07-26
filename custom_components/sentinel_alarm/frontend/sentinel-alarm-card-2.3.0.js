@@ -33,6 +33,14 @@ const SLOTS = 36;                 // alt serit: 12 saat / 36 = 20'ser dakika
 const TL_HOURS = 6;               // oda cizelgesi: son kac saat
 const TL_MERGE = 120000;          // bu araliktaki tetiklemeler tek hareket
 
+/* Aci degiskeni DOCUMENT seviyesinde kayitli olmali — shadow DOM icindeki
+   @property yok sayilir ve gradyan donmez, sadece durur. */
+if (window.CSS && CSS.registerProperty) {
+  try {
+    CSS.registerProperty({ name: "--spin", syntax: "<angle>", initialValue: "0deg", inherits: false });
+  } catch (e) { /* zaten kayitli */ }
+}
+
 function ce(tag, cls, text) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -306,8 +314,12 @@ class SentinelAlarmCard extends HTMLElement {
         z-index:-1;animation:spin var(--sp,7s) linear infinite;}
       .glow::before{filter:blur(16px);opacity:.9;}
       .glow::after{filter:blur(3px);opacity:.55;inset:-1px;}
+      /* Yedek: tarayici --spin'i canlandiramazsa hale yine de nefes alsin. */
+      @supports not (background: conic-gradient(from 0deg, red, blue)) {
+        .glow::before,.glow::after{animation:pulse 3.5s ease-in-out infinite;}
+      }
+      @keyframes pulse{0%,100%{opacity:.45}50%{opacity:1}}
       @keyframes spin{to{--spin:360deg;}}
-      @property --spin{syntax:'<angle>';initial-value:0deg;inherits:false;}
       .glow.hot{--sp:2.2s;}
       @media (prefers-reduced-motion: reduce){
         .glow::before,.glow::after{animation:none;}
@@ -316,7 +328,13 @@ class SentinelAlarmCard extends HTMLElement {
       ha-card{position:relative;z-index:1;background:#0b0910;border-radius:22px;
         border:.5px solid #241f2c;overflow:hidden;color:#fff;
         font-family:'Inter','Segoe UI',system-ui,sans-serif;}
-      .wrap{padding:20px 20px 16px;}
+      /* Arka plan resmi + uzerine koyu ortu: resim ne olursa olsun yazi okunur
+         kalsin diye ortu her zaman var. */
+      .bg{position:absolute;inset:0;background-position:center;background-size:cover;
+        background-repeat:no-repeat;z-index:0;}
+      .bg::after{content:"";position:absolute;inset:0;
+        background:linear-gradient(180deg,rgba(11,9,16,.82),rgba(11,9,16,.9));}
+      .wrap{position:relative;z-index:1;padding:20px 20px 16px;}
 
       .top{display:flex;align-items:center;gap:12px;margin-bottom:18px;flex-wrap:wrap;}
       .state{font-size:30px;font-weight:600;letter-spacing:-.6px;line-height:1;}
@@ -363,12 +381,22 @@ class SentinelAlarmCard extends HTMLElement {
       .tlempty{margin-left:78px;font-size:11.5px;color:#5d5668;padding:14px 0;}
 
       /* --- alt: istatistikler + basili tut --- */
-      .foot{display:grid;grid-template-columns:repeat(3,1fr) 200px;gap:8px;align-items:stretch;}
-      @media (max-width:620px){.foot{grid-template-columns:1fr 1fr;}}
+      .foot{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) minmax(160px,200px);
+        gap:8px;align-items:stretch;}
+      /* Dar kartta dort sutun sikisiyor: uc kutu ustte, dugme tam genislikte
+         altta. Dugme boylece uzamaz, sadece bir satir asagi iner. */
+      @media (max-width:760px){
+        .foot{grid-template-columns:repeat(3,minmax(0,1fr));}
+        .foot .hold{grid-column:1 / -1;}
+      }
+      @media (max-width:430px){
+        .foot{grid-template-columns:1fr 1fr;}
+      }
       .stat{background:#0e0b13;border:.5px solid #211c29;border-radius:12px;
-        padding:11px 13px;display:flex;align-items:center;justify-content:space-between;}
-      .stat .k{font-size:10px;letter-spacing:1.2px;color:#7d7489;text-transform:uppercase;}
-      .stat .v{font-size:15px;font-variant-numeric:tabular-nums;font-weight:600;}
+        padding:10px 13px 11px;display:flex;flex-direction:column;gap:6px;min-width:0;}
+      .stat .k{font-size:9.5px;letter-spacing:1.3px;color:#7d7489;text-transform:uppercase;
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+      .stat .v{font-size:18px;font-variant-numeric:tabular-nums;font-weight:600;line-height:1;}
       .stat .v.hi{color:#ffb86b;}
       .hold{border-radius:12px;border:.5px solid #2b2436;background:#141019;
         padding:11px 10px;text-align:center;font-size:13px;cursor:pointer;user-select:none;
@@ -420,6 +448,8 @@ class SentinelAlarmCard extends HTMLElement {
     this._glow = ce("div", "glow");
     this._root = ce("div", "wrap");
     const card = document.createElement("ha-card");
+    this._bg = ce("div", "bg");
+    card.appendChild(this._bg);
     card.appendChild(this._root);
     this._glow.appendChild(card);
     this.shadowRoot.appendChild(style);
@@ -447,6 +477,13 @@ class SentinelAlarmCard extends HTMLElement {
     const tr = this._tr();
     const armedNow = ARMED.includes(state) || state === "arming" || state === "pending";
     const hot = state === "triggered";
+
+    // arka plan: kart yapilandirmasi > panel ayari
+    const bg = (this._config && this._config.background) || a.card_bg || "";
+    if (this._bg) {
+      this._bg.style.backgroundImage = bg ? `url("${bg}")` : "";
+      this._bg.style.display = bg ? "" : "none";
+    }
 
     // cerceve rengi
     this._glow.classList.toggle("hot", hot);

@@ -565,6 +565,13 @@ const I18N = {
   ai_gemini_s:  { en: "for Gemini voices (Kore, Puck, Charon…)", tr: "Gemini sesleri için (Kore, Puck, Charon…)" },
   ai_ready:     { en: "AI voices are now available in the voice dropdowns", tr: "AI sesler artık ses menülerinde seçilebilir" },
   f_lang:       { en: "Panel language", tr: "Panel dili" },
+  set_card:     { en: "CARD", tr: "KART" },
+  f_cardbg:     { en: "Card background", tr: "Kart arka planı" },
+  f_cardbg_s:   { en: " — drop an image here, or paste a /local/… path", tr: " — buraya bir resim bırak, ya da /local/… yolu yaz" },
+  bg_drop:      { en: "Drop an image here", tr: "Resmi buraya bırak" },
+  bg_clear:     { en: "Remove", tr: "Kaldır" },
+  bg_upload:    { en: "Uploading…", tr: "Yükleniyor…" },
+  bg_bad:       { en: "Only image files", tr: "Sadece resim dosyası" },
   close:        { en: "Close", tr: "Kapat" },
 
   set_file:     { en: "BACKUP FILE", tr: "YEDEK DOSYASI" },
@@ -1694,7 +1701,17 @@ class SentinelAlarmPanel extends HTMLElement {
         .dev .gtag{margin-left:4px;padding:1px 6px;font-size:9px;}
         .btn[disabled]{opacity:.4;cursor:default;filter:none;}
         .ovlist{max-height:52vh;overflow-y:auto;margin-top:10px;}
-        .lang2{display:flex;gap:10px;}
+        .bgdrop{display:flex;align-items:center;gap:12px;border:1px dashed #2f2838;border-radius:12px;
+  padding:10px 12px;cursor:pointer;transition:border-color .18s,background .18s;margin-bottom:8px}
+.bgdrop:hover,.bgdrop.over{border-color:#ec4b88;background:#1a1220}
+.bgprev{width:64px;height:40px;flex:0 0 64px;border-radius:8px;background:#191320 center/cover no-repeat;
+  border:.5px solid #2b2436}
+.bgprev.on{border-color:#ec4b8866}
+.bgnote{font-size:11.5px;color:#8d8299;word-break:break-all;line-height:1.4}
+.bgclear{display:inline-block;font-size:11px;color:#8d8299;cursor:pointer;padding:4px 0;
+  text-decoration:underline;text-underline-offset:3px}
+.bgclear:hover{color:#ff7d9c}
+.lang2{display:flex;gap:10px;}
         .lang2 .lo{flex:1;border:1px solid rgba(255,255,255,.1);border-radius:14px;padding:12px;
           text-align:center;font-size:13.5px;cursor:pointer;color:#8d8290;}
         .lang2 .lo.on{border-color:rgba(236,75,136,.65);background:rgba(236,75,136,.14);color:#fff;}
@@ -4653,6 +4670,59 @@ class SentinelAlarmPanel extends HTMLElement {
     ed.appendChild(this._row(this.T("f_attempts"), "",
       this._slider(c.code_attempts, 1, 10, 1, (v) => { c.code_attempts = v; this._save(); },
         (v) => `${v} ${this.T("attempts_u")}`)));
+
+    /* kart arka plani — surukle birak ya da elle yol */
+    ed.appendChild(label(this.T("set_card"), "mdi:card-outline"));
+    ed.appendChild(fieldLab(this.T("f_cardbg"), this.T("f_cardbg_s")));
+    const bgWrap = el("div", "bgdrop");
+    const bgNote = el("div", "bgnote", esc(this.T("bg_drop")));
+    const bgPrev = el("div", "bgprev");
+    const setPrev = () => {
+      const u = (c.card_bg || "").trim();
+      bgPrev.style.backgroundImage = u ? `url("${u}")` : "";
+      bgPrev.classList.toggle("on", !!u);
+      bgNote.textContent = u || this.T("bg_drop");
+    };
+    setPrev();
+    bgWrap.appendChild(bgPrev);
+    bgWrap.appendChild(bgNote);
+    const upload = async (file) => {
+      if (!file || !/^image\//.test(file.type)) { bgNote.textContent = this.T("bg_bad"); return; }
+      bgNote.textContent = this.T("bg_upload");
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("kind", "image");
+      try {
+        const r = await this._hass.fetchWithAuth("/api/sentinel_alarm/media",
+          { method: "POST", body: fd });
+        const j = await r.json();
+        if (!j || !j.url) throw new Error("no url");
+        c.card_bg = j.url;
+        this._save();
+        setPrev();
+      } catch (e) {
+        bgNote.textContent = this.T("bg_bad");
+      }
+    };
+    bgWrap.ondragover = (e) => { e.preventDefault(); bgWrap.classList.add("over"); };
+    bgWrap.ondragleave = () => bgWrap.classList.remove("over");
+    bgWrap.ondrop = (e) => {
+      e.preventDefault();
+      bgWrap.classList.remove("over");
+      upload(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]);
+    };
+    bgWrap.onclick = () => {
+      const inp = document.createElement("input");
+      inp.type = "file"; inp.accept = "image/*";
+      inp.onchange = () => upload(inp.files && inp.files[0]);
+      inp.click();
+    };
+    ed.appendChild(bgWrap);
+    ed.appendChild(this._text(c.card_bg || "", "/local/sentinel/arka.jpg",
+      (v) => { c.card_bg = v.trim(); this._save(); setPrev(); }));
+    const bgClear = el("div", "bgclear", esc(this.T("bg_clear")));
+    bgClear.onclick = () => { c.card_bg = ""; this._save(); setPrev(); this._openSettings(true); };
+    ed.appendChild(bgClear);
 
     /* dil + ai */
     ed.appendChild(label(this.T("set_lang"), "mdi:translate"));

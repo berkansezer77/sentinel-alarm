@@ -7,11 +7,11 @@ FRONTEND_URL_BASE = "/sentinel_alarm_frontend"
 
 # Bump on every frontend change — the version lives in the FILE NAME (not ?v=)
 # so service workers / browser caches are forced to fetch the fresh file.
-FRONTEND_VERSION = "1.14.0"
+FRONTEND_VERSION = "1.15.0"
 
 # Lovelace custom card ships with the integration; version lives in the file
 # name so browser caches fetch the fresh file after an update.
-CARD_VERSION = "2.2.0"
+CARD_VERSION = "2.3.0"
 
 STORE_VERSION = 1
 STORE_KEY = "sentinel_alarm_config"
@@ -59,6 +59,7 @@ DEFAULT_CONFIG = {
     "tts_target": "",
     # Anons öncesi hoparlörün sesi bu seviyeye çekilir, anons bitince eski
     # haline döner. 0 = dokunma (sessizde kalan tablet anonsu yutar).
+    "card_bg": "",
     "tts_volume": 80,
     "notify": [],
     "cameras": [],

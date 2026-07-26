@@ -153,6 +153,8 @@ class SentinelAlarmPanel(AlarmControlPanelEntity, RestoreEntity):
             "room_sensors": self._engine.room_sensors(),
             "events": self._engine.recent_events(4),
             "language": self._engine.lang,
+            # Kart arka plani panelden secilir; kart onu buradan okur.
+            "card_bg": self._engine.config.get("card_bg") or "",
         }
 
     async def async_added_to_hass(self) -> None:

@@ -240,6 +240,7 @@ class SentinelActionView(HomeAssistantView):
 
 
 AUDIO_EXT = (".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac")
+IMAGE_EXT = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif")
 # TTS caches live in www too and would bury the real sounds under hundreds of
 # generated clips — keep them out of the picker.
 SKIP_DIRS = {"alexa_tts", "tts", "tts_cache", "tts_ai", "community", "png"}
@@ -302,9 +303,13 @@ class SentinelMediaView(HomeAssistantView):
 
         raw_name = os.path.basename(field.filename or "")
         stem, ext = os.path.splitext(raw_name)
-        if ext.lower() not in AUDIO_EXT:
-            return self.json_message("Only audio files are allowed", status_code=400)
-        safe = f"{slugify(stem) or 'sound'}{ext.lower()}"
+        kind = str(data.get("kind") or "audio")
+        allowed = IMAGE_EXT if kind == "image" else AUDIO_EXT
+        if ext.lower() not in allowed:
+            return self.json_message(
+                "Only image files are allowed" if kind == "image"
+                else "Only audio files are allowed", status_code=400)
+        safe = f"{slugify(stem) or ('image' if kind == 'image' else 'sound')}{ext.lower()}"
 
         payload = field.file.read(MAX_UPLOAD + 1)
         if len(payload) > MAX_UPLOAD:
