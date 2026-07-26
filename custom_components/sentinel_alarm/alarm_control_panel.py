@@ -7,6 +7,7 @@ Flow:  disarmed -> (exit delay) arming -> armed_x
 from __future__ import annotations
 
 import logging
+import time
 from datetime import timedelta
 
 from homeassistant.components.alarm_control_panel import (
@@ -38,6 +39,11 @@ from .const import DOMAIN, SIGNAL_CONFIG
 from .engine import SentinelEngine
 
 _LOGGER = logging.getLogger(__name__)
+
+# Kod yanlış girilmeye devam ederse beklemeyi uzat. Sıfırlanmaz: her tur bir
+# sonrakine geçer, doğru kod girilince başa döner. (Home Assistant yeniden
+# başlarsa sıfırlanır — o da yönetici yetkisi ister.)
+LOCKOUT_STEPS = (30, 120, 300, 900)
 
 ARMED_STATE = {
     "home": AlarmControlPanelState.ARMED_HOME,
@@ -80,6 +86,8 @@ class SentinelAlarmPanel(AlarmControlPanelEntity, RestoreEntity):
         self._mode = ""           # target arm mode while arming/armed
         self._changed_by = ""
         self._bad_code = 0
+        self._lock_until = 0.0    # monotonik: bu ana kadar kod kabul edilmez
+        self._lock_round = 0      # kaçıncı kilit turu — bekleme buna göre uzar
         self._trigger_source = ""
         self._trigger_eid = ""
         # Kart için: o an hangi geçici fazdayız ve ne zaman biter (geri sayım).
@@ -214,21 +222,41 @@ class SentinelAlarmPanel(AlarmControlPanelEntity, RestoreEntity):
         )
 
     def _check_code(self, code: str | None) -> None:
+        """Validate the disarm code, and make guessing expensive.
+
+        Without a wait between rounds a four-digit code is only ten thousand
+        tries — worth nothing. Each time the attempt limit is reached the panel
+        stops accepting codes for a while, and the wait grows with every round.
+        """
         want = str(self._engine.config.get("code") or "")
         if not want:
             return
+
+        now = time.monotonic()
+        if now < self._lock_until:
+            left = int(self._lock_until - now) + 1
+            raise HomeAssistantError(
+                f"Too many wrong codes. Try again in {left}s"
+            )
+
         if str(code or "") == want:
             self._bad_code = 0
+            self._lock_round = 0
             return
+
         self._bad_code += 1
         limit = int(self._engine.config.get("code_attempts") or 3)
         if self._bad_code >= limit:
-            text = self._engine.msg("wrong_code", self._bad_code)
+            wait = LOCKOUT_STEPS[min(self._lock_round, len(LOCKOUT_STEPS) - 1)]
+            self._lock_until = now + wait
+            self._lock_round += 1
+            self._bad_code = 0
+            text = self._engine.msg("wrong_code", limit)
             self._engine.log("code", text)
             self.hass.async_create_task(
                 self._engine.async_notify(text, critical=True, with_camera=True)
             )
-            self._bad_code = 0
+            raise HomeAssistantError(f"Too many wrong codes. Try again in {wait}s")
         raise HomeAssistantError("Invalid alarm code")
 
     def _cancel_all(self) -> None:

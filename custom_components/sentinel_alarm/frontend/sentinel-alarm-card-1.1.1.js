@@ -136,7 +136,12 @@ class SentinelAlarmCard extends HTMLElement {
       } catch (e) {
         code = "";
         paint();
-        err.textContent = tr ? "Kod hatali" : "Wrong code";
+        // Backend kilitlenmeyi ("Try again in 120s") bildirebiliyor — ne
+        // dediyse onu goster, yoksa genel mesaja dus.
+        const raw = (e && (e.message || e.body?.message)) || "";
+        err.textContent = /try again/i.test(raw)
+          ? raw.replace(/^.*?(Try again in \d+s).*$/i, "$1")
+          : (tr ? "Kod hatali" : "Wrong code");
         box.classList.remove("shake");
         void box.offsetWidth;          // animasyonu yeniden tetikle
         box.classList.add("shake");
