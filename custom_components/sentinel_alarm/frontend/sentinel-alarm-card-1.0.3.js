@@ -217,7 +217,12 @@ class SentinelAlarmCard extends HTMLElement {
     const meta = CARD_STATE[state] || CARD_STATE.disarmed;
 
     this._card.style.borderColor = triggered ? "rgba(255,59,92,.5)" : "#2a2530";
-    this._card.querySelector(".wrap")?.remove?.();
+    // `.wrap` içeriğin yazıldığı düğüm (`this._root`). Onu buradan
+    // silmek kartı boşaltıyordu: içerik DOM'dan kopmuş bir div'e
+    // yazılıyor, ha-card boş kalıyordu. Temizlik zaten yukarıdaki
+    // textContent = "" ile yapılıyor; burada sadece bağlı olduğundan
+    // emin oluyoruz.
+    if (this._root.parentNode !== this._card) this._card.appendChild(this._root);
     this._card.style.background = triggered ? "#140a10" : "#0c0a10";
 
     // header

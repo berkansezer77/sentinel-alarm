@@ -15,12 +15,13 @@ import time
 
 import voluptuous as vol
 
-from homeassistant.components import frontend, panel_custom
+from homeassistant.components import panel_custom
 from homeassistant.components.http import HomeAssistantView, StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.start import async_at_start
 from homeassistant.helpers.storage import Store
 from homeassistant.util import slugify
@@ -357,19 +358,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.http.register_view(SentinelMediaView(hass))
         hass.http.register_view(SentinelBackupView(engine))
 
-        # Lovelace kartını hem ekstra modül (kart seçici) hem de gerçek
-        # RESOURCE olarak kaydet — böylece elle "kaynak ekle" yapmadan yüklenir.
-        card_url = f"{FRONTEND_URL_BASE}/sentinel-alarm-card-{CARD_VERSION}.js"
-        try:
-            frontend.add_extra_js_url(hass, card_url)
-        except Exception:  # noqa: BLE001
-            pass
-
-        async def _card_at_start(_hass: HomeAssistant) -> None:
-            await _register_card_resource(hass, card_url)
-
-        async_at_start(hass, _card_at_start)
-
         try:
             await panel_custom.async_register_panel(
                 hass,
@@ -389,6 +377,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         engine.setup_notify_actions()
         domain_data["frontend_registered"] = True
 
+    # Kart kaydı her kurulumda tazelenir — bilerek `frontend_registered`
+    # bloğunun dışında. Sürüm dosya adında olduğu için bir güncellemeden sonra
+    # kayıtlı adres eskir; burada olması, girdi yeniden yüklendiğinde de
+    # düzelmesini sağlar. Aynı adres zaten kayıtlıysa hiçbir şey yazılmaz.
+    card_url = f"{FRONTEND_URL_BASE}/sentinel-alarm-card-{CARD_VERSION}.js"
+
+    # Bilerek `add_extra_js_url` KULLANMIYORUZ. Kartı hem oradan hem Lovelace
+    # kaynağı olarak yüklemek, dosyanın iki ayrı yükleme aşamasında çalışması
+    # demek: ikinci `customElements.define` "already been used" diye patlar ve
+    # Lovelace kartı "Custom element doesn't exist" sayar. Tek kayıt yolu =
+    # Lovelace kaynağı; kart seçicideki görünürlüğü dosyanın kendi
+    # `window.customCards` kaydı sağlıyor.
+
+    async def _card_at_start(_hass: HomeAssistant) -> None:
+        await _register_card_resource(hass, card_url)
+
+    async_at_start(hass, _card_at_start)
+
     # Saat programı / kişi takibi — config değişiminde de yeniden kurulur.
     engine.setup_auto()
 
@@ -396,34 +402,82 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-async def _register_card_resource(hass: HomeAssistant, url: str) -> None:
-    """Register the Lovelace card as a resource so users don't add it by hand.
+def _lovelace_resources(hass: HomeAssistant):
+    """The Lovelace resource store, or None if it cannot be written to.
 
-    Works in storage (UI) mode; YAML-managed resources are read-only and left
-    alone (the extra-module-url fallback still exposes the card there).
+    Returns None both while Lovelace is still starting and when resources are
+    managed from YAML — YAML stores are read-only, and there the extra-module-url
+    fallback is what exposes the card.
     """
     lovelace = hass.data.get("lovelace")
     resources = getattr(lovelace, "resources", None)
     if resources is None and isinstance(lovelace, dict):
         resources = lovelace.get("resources")
-    # YAML-mode resource stores have no create/update — skip silently.
     if resources is None or not hasattr(resources, "async_create_item"):
-        return
-    try:
-        if not getattr(resources, "loaded", True):
-            await resources.async_load()
-            resources.loaded = True
-        base = f"{FRONTEND_URL_BASE}/sentinel-alarm-card-"
-        for item in resources.async_items():
-            if base in (item.get("url") or ""):
-                if item.get("url") != url:
-                    await resources.async_update_item(
-                        item["id"], {"res_type": "module", "url": url}
-                    )
-                return
+        return None
+    return resources
+
+
+async def _sync_card_resource(hass: HomeAssistant, url: str) -> bool:
+    """Make the registered resource match `url` exactly. True when it is in place.
+
+    Every stale `sentinel-alarm-card-*.js` entry is removed rather than left
+    behind: two entries for the same card make the browser load it twice, and
+    the second `customElements.define` then throws and takes the card with it.
+    """
+    resources = _lovelace_resources(hass)
+    if resources is None:
+        return False
+
+    if not getattr(resources, "loaded", True):
+        await resources.async_load()
+        resources.loaded = True
+
+    base = f"{FRONTEND_URL_BASE}/sentinel-alarm-card-"
+    ours = [i for i in resources.async_items() if base in (i.get("url") or "")]
+
+    if not ours:
         await resources.async_create_item({"res_type": "module", "url": url})
-    except Exception as err:  # noqa: BLE001
-        _LOGGER.warning("Sentinel: card resource not registered (%s)", err)
+        _LOGGER.info("Sentinel: card resource added (%s)", url)
+        return True
+
+    keep, extras = ours[0], ours[1:]
+    if keep.get("url") != url:
+        await resources.async_update_item(keep["id"], {"res_type": "module", "url": url})
+        _LOGGER.info("Sentinel: card resource updated to %s", url)
+    for item in extras:
+        await resources.async_delete_item(item["id"])
+        _LOGGER.info("Sentinel: removed duplicate card resource %s", item.get("url"))
+    return True
+
+
+async def _register_card_resource(hass: HomeAssistant, url: str) -> None:
+    """Keep trying until Lovelace is ready to take the resource.
+
+    Component start order is not guaranteed: on a cold boot Lovelace is often
+    not up yet when we first ask. Giving up quietly at that point is what leaves
+    people adding the resource by hand, so retry on a widening delay instead.
+    """
+    delays = (0, 5, 15, 30, 60, 120)
+
+    async def _attempt(index: int) -> None:
+        try:
+            if await _sync_card_resource(hass, url):
+                return
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning("Sentinel: card resource attempt failed (%s)", err)
+        nxt = index + 1
+        if nxt < len(delays):
+            async_call_later(
+                hass, delays[nxt], lambda _now: hass.async_create_task(_attempt(nxt))
+            )
+        else:
+            _LOGGER.warning(
+                "Sentinel: could not register the card resource. If your Lovelace "
+                "resources are managed in YAML, add it yourself: %s", url
+            )
+
+    await _attempt(0)
 
 
 def _register_services(hass: HomeAssistant, engine: SentinelEngine) -> None:
