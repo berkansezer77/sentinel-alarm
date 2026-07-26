@@ -100,8 +100,6 @@ timeline, with per-block duplicate and delete, so it never looks like a timer.
 "What actually ran" — a timeline of every armed / triggered / disarmed event with
 every action step underneath it, and why each one ran or was skipped.
 
-<img src="https://raw.githubusercontent.com/berkansezer77/sentinel-alarm/main/docs/images/activity.png" alt="Activity log">
-
 ### Backup
 Export your whole configuration to a file and import it back.
 
@@ -126,6 +124,21 @@ The card resource registers itself — nothing to add manually.
 3. **Settings → Devices & Services → Add Integration → Sentinel Alarm**
 
 After setup, **Sentinel** appears in the sidebar. Everything is configured there.
+
+## Documentation
+
+Full user guide in the **[wiki](https://github.com/berkansezer77/sentinel-alarm/wiki)** —
+every page of the panel explained, with worked examples:
+
+[Installation](https://github.com/berkansezer77/sentinel-alarm/wiki/Installation) ·
+[Zones and Sensors](https://github.com/berkansezer77/sentinel-alarm/wiki/Zones-and-Sensors) ·
+[Modes](https://github.com/berkansezer77/sentinel-alarm/wiki/Modes) ·
+[Actions](https://github.com/berkansezer77/sentinel-alarm/wiki/Actions) ·
+[Automatic](https://github.com/berkansezer77/sentinel-alarm/wiki/Automatic) ·
+[Night Lights](https://github.com/berkansezer77/sentinel-alarm/wiki/Night-Lights) ·
+[Vacation](https://github.com/berkansezer77/sentinel-alarm/wiki/Vacation-Simulation) ·
+[Recipes](https://github.com/berkansezer77/sentinel-alarm/wiki/Recipes) ·
+[Troubleshooting](https://github.com/berkansezer77/sentinel-alarm/wiki/Troubleshooting)
 
 ## Adding the card
 
