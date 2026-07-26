@@ -58,12 +58,21 @@ MAX_SNAPSHOTS = 30     # www/sentinel'de tutulan kamera fotoğrafı sayısı
 # How long one `flash: long` blinks for. Zigbee/Hue "long alert" is ~15 s, and
 # it snaps the light back to its pre-alert colour when it ends.
 ALERT_SECONDS = 15.0
+QUIET_RECHECK = 60.0     # ev sessizlesmediyse kac saniyede bir tekrar bak
 
 # Bilingual message templates. {n} is filled with a device name / list.
 MSG = {
     "blocked": {
         "en": "Alarm could not be armed. {n} open.",
         "tr": "Alarm kurulamadı. {n} açık.",
+    },
+    "quiet_wait": {
+        "en": "Nobody is marked home, but {n} still shows movement — waiting before arming.",
+        "tr": "Kimse evde görünmüyor ama {n} hâlâ hareket veriyor — kurmadan önce bekleniyor.",
+    },
+    "quiet_ok": {
+        "en": "The house went quiet — arming now.",
+        "tr": "Ev sessizleşti — alarm şimdi kuruluyor.",
     },
     "exit_fault": {
         "en": "Alarm NOT armed — {n} still open when the exit delay ran out.",
@@ -175,6 +184,10 @@ class SentinelEngine:
         # Panelden elle çalıştırılan zincirin sahibi — serbest `service`
         # adımı onun adına çağrılsın ki HA'nın izin kontrolü devreye girsin.
         self._step_ctx: Context | None = None
+        # Home Assistant yeniden baslayinca butun sensorler o an yayinlanir ve
+        # `last_changed` tazelenir — hicbiri gercekten hareket etmemis olsa da.
+        # Sessizlik kontrolu bunu hareket sanmasin diye acilis anini tutuyoruz.
+        self._boot_at = dt_util.utcnow()
         # Otomatik kurulum + geri sayım bipleri
         self._auto_unsubs: list = []
         self._leave_timer = None
@@ -1783,7 +1796,33 @@ class SentinelEngine:
             self.hass, delay, lambda _n: self.hass.async_create_task(self._leave_elapsed(mode))
         )
 
-    async def _leave_elapsed(self, mode: str) -> None:
+    def quiet_busy(self, mode: str) -> list[str]:
+        """Bu modu koruyan hareket/varlık sensörlerinden hâlâ canlı olanlar.
+
+        Kimse "evde yok" görünse de HA kullanmayan biri içeride olabilir —
+        misafir, çocuk, telefonu olmayan biri. Kapı/pencere kontakları burada
+        sayılmaz: açık bırakılmış bir pencere hareket demek değildir.
+        """
+        cfg = ((self.config.get("auto") or {}).get("leave") or {}).get("quiet") or {}
+        if not cfg.get("enabled"):
+            return []
+        minutes = max(1, int(cfg.get("minutes") or 5))
+        cutoff = dt_util.utcnow() - timedelta(minutes=minutes)
+        busy: list[str] = []
+        for eid in self.sensors_for(mode):
+            if self.is_contact(eid):
+                continue
+            st = self.hass.states.get(eid)
+            if st is None or st.state in ("unavailable", "unknown"):
+                continue
+            if self.is_active(eid):
+                busy.append(eid)                     # şu anda hareket var
+            elif (st.last_changed and st.last_changed > cutoff
+                  and st.last_changed > self._boot_at + timedelta(seconds=30)):
+                busy.append(eid)                     # az önce vardı
+        return busy
+
+    async def _leave_elapsed(self, mode: str, tries: int = 0) -> None:
         self._leave_timer = None
         auto = self.config.get("auto") or {}
         watched = [p for p in ((auto.get("leave") or {}).get("persons") or []) if p]
@@ -1791,6 +1830,26 @@ class SentinelEngine:
             return                      # bu arada biri döndü
         if self._is_armed_now():
             return
+
+        # Evde hâlâ kıpırdayan biri var mı? Varsa kurma — sussun diye bekle ve
+        # tekrar bak. Telefonu takip edilmeyen birinin üstüne alarm kurmamak
+        # için tek gerçek koruma bu.
+        busy = self.quiet_busy(mode)
+        if busy:
+            if tries == 0:
+                names = ", ".join(self.name_of(e) for e in busy[:3])
+                text = self.msg("quiet_wait", names)
+                self.log("blocked", text, mode)
+                if self.config.get("warn_on_blocked", True):
+                    self.hass.async_create_task(self.async_notify(text))
+            self._leave_timer = async_call_later(
+                self.hass, QUIET_RECHECK,
+                lambda _n: self.hass.async_create_task(self._leave_elapsed(mode, tries + 1)),
+            )
+            return
+
+        if tries:
+            self.log("auto", self.msg("quiet_ok"), mode)
         await self._arm_mode(mode, self.msg("auto_leave"))
 
     # ------------------------------------------------------------------ bip adımı

@@ -7,7 +7,7 @@ FRONTEND_URL_BASE = "/sentinel_alarm_frontend"
 
 # Bump on every frontend change — the version lives in the FILE NAME (not ?v=)
 # so service workers / browser caches are forced to fetch the fresh file.
-FRONTEND_VERSION = "1.15.0"
+FRONTEND_VERSION = "1.16.0"
 
 # Lovelace custom card ships with the integration; version lives in the file
 # name so browser caches fetch the fresh file after an update.
@@ -96,7 +96,12 @@ DEFAULT_CONFIG = {
     "auto": {
         # [{id, time:"23:30", mode:"night", days:[0..6], enabled:true}]
         "schedules": [],
-        "leave": {"enabled": False, "persons": [], "mode": "away", "delay": 5},
+        "leave": {
+            "enabled": False, "persons": [], "mode": "away", "delay": 5,
+            # Kurmadan once ev gercekten sessiz mi? Telefonu takip
+            # edilmeyen biri iceride kalmis olabilir.
+            "quiet": {"enabled": False, "minutes": 5},
+        },
         "arrive": {"enabled": False, "persons": []},
         # Bir cihaz açılınca/kapanınca kur ya da kapat:
         # [{id, entity, state:"on"|"off", mode:"away"|…|"disarm", delay, enabled}]

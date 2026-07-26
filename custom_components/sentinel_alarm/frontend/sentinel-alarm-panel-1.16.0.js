@@ -565,6 +565,12 @@ const I18N = {
   ai_gemini_s:  { en: "for Gemini voices (Kore, Puck, Charon…)", tr: "Gemini sesleri için (Kore, Puck, Charon…)" },
   ai_ready:     { en: "AI voices are now available in the voice dropdowns", tr: "AI sesler artık ses menülerinde seçilebilir" },
   f_lang:       { en: "Panel language", tr: "Panel dili" },
+  au_quiet:     { en: "Check the house is empty", tr: "Ev gerçekten boş mu, kontrol et" },
+  au_quiet_s:   { en: "don't arm while something is still moving — somebody may be home without a tracked phone",
+                  tr: "içeride hâlâ hareket varsa kurma — telefonu takip edilmeyen biri evde olabilir" },
+  au_quiet_m:   { en: "Quiet for", tr: "Ne kadar sessiz olsun" },
+  au_quiet_m_s: { en: "no movement for this long before it arms; it keeps checking every minute",
+                  tr: "bu süre boyunca hareket olmazsa kurar; dakikada bir tekrar bakar" },
   set_card:     { en: "CARD", tr: "KART" },
   f_cardbg:     { en: "Card background", tr: "Kart arka planı" },
   f_cardbg_s:   { en: " — drop an image here, or paste a /local/… path", tr: " — buraya bir resim bırak, ya da /local/… yolu yaz" },
@@ -3048,6 +3054,18 @@ class SentinelAlarmPanel extends HTMLElement {
         this._slider(a.leave.delay == null ? 5 : a.leave.delay, 0, 60, 1,
           (v) => { a.leave.delay = v; this._save(); },
           (v) => (v === 0 ? this.T("instant") : `${v} ${this.T("min_u")}`))));
+
+      /* Sessizlik kontrolu: telefonu takip edilmeyen biri iceride olabilir */
+      if (!a.leave.quiet) a.leave.quiet = { enabled: false, minutes: 5 };
+      const q = a.leave.quiet;
+      lv.appendChild(this._row(this.T("au_quiet"), this.T("au_quiet_s"),
+        this._toggle(!!q.enabled, (v) => { q.enabled = v; this._save(); this._render(); })));
+      if (q.enabled) {
+        lv.appendChild(this._row(this.T("au_quiet_m"), this.T("au_quiet_m_s"),
+          this._slider(q.minutes == null ? 5 : q.minutes, 1, 30, 1,
+            (v) => { q.minutes = v; this._save(); },
+            (v) => `${v} ${this.T("min_u")}`)));
+      }
     }
 
     /* 3) Cihaz tetikleyicileri — bir entity açılınca/kapanınca */
