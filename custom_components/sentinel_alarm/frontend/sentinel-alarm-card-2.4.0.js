@@ -232,32 +232,13 @@ class SentinelAlarmCard extends HTMLElement {
       total += merged.length;
     }
 
-    // aynı istekten alarmın kurulu olduğu aralıklar da lazım (üstteki bantlar)
-    let bands = [];
-    try {
-      const url2 = `history/period/${start.toISOString()}`
-        + `?filter_entity_id=${this._entity}&minimal_response&no_attributes`
-        + `&end_time=${end.toISOString()}`;
-      const r2 = await this._hass.callApi("GET", url2);
-      const rows = (r2 && r2[0]) || [];
-      for (let i = 0; i < rows.length; i++) {
-        const v = rows[i].state;
-        if (!(ARMED.includes(v) || v === "arming" || v === "triggered")) continue;
-        const from = new Date(rows[i].last_changed || rows[i].last_updated).getTime();
-        const to = i + 1 < rows.length
-          ? new Date(rows[i + 1].last_changed || rows[i + 1].last_updated).getTime()
-          : end.getTime();
-        bands.push([from, to]);
-      }
-    } catch (e) { /* bant olmasa da cizelge calisir */ }
-
-    this._tl = { byRoom, bands, start, end, total };
+    this._tl = { byRoom, start, end, total };
     this._paintTimeline();
   }
 
   _paintTimeline() {
     if (!this._tl || !this._laneEls) return;
-    const { byRoom, bands, start, end, total } = this._tl;
+    const { byRoom, start, end, total } = this._tl;
     const span = end.getTime() - start.getTime();
     const pct = (t) => ((t - start.getTime()) / span) * 100;
 
@@ -267,16 +248,6 @@ class SentinelAlarmCard extends HTMLElement {
         const i = ce("i");
         i.style.left = `${Math.min(99.7, Math.max(0, pct(ts)))}%`;
         lane.appendChild(i);
-      }
-    }
-    if (this._armBar) {
-      this._armBar.textContent = "";
-      for (const [f, t] of bands || []) {
-        const b = ce("i");
-        const l = Math.max(0, pct(f));
-        b.style.left = `${l}%`;
-        b.style.width = `${Math.max(0.6, Math.min(100 - l, pct(t) - l))}%`;
-        this._armBar.appendChild(b);
       }
     }
     if (this._tlAxis) {
@@ -364,12 +335,6 @@ class SentinelAlarmCard extends HTMLElement {
       /* --- oda hareket cizelgesi --- */
       .tl{border-top:.5px solid #1d1825;border-bottom:.5px solid #1d1825;
         padding:12px 0 8px;margin-bottom:14px;}
-      .tlhd{display:flex;align-items:center;gap:10px;margin:0 0 7px 78px;flex-wrap:wrap;}
-      .tlhd .lg{display:flex;align-items:center;gap:6px;font-size:9px;letter-spacing:1.1px;
-        color:#5d5668;text-transform:uppercase;white-space:nowrap;}
-      .tlhd .lg i{width:12px;height:4px;border-radius:2px;display:block;}
-      .tlarm{height:6px;position:relative;margin:0 0 9px 78px;}
-      .tlarm i{position:absolute;top:0;height:6px;border-radius:3px;background:#c98f2e;}
       .row{display:flex;align-items:center;height:22px;}
       .row .nm{width:78px;flex:0 0 78px;font-size:11.5px;color:#6f6779;
         white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:8px;}
@@ -420,7 +385,7 @@ class SentinelAlarmCard extends HTMLElement {
       .bars{display:flex;gap:3px;}
       .bars i{flex:1;height:17px;border-radius:3px;background:#1c1725;}
       .bars i.on{background:#5fe39a;}
-      .bars i.hit{background:#ffb86b;}
+      .bars i.hit{background:#ff4d6d;}
       .axis{display:flex;justify-content:space-between;margin-top:6px;font-size:9.5px;
         color:#5d5668;font-variant-numeric:tabular-nums;}
 
@@ -549,19 +514,6 @@ class SentinelAlarmCard extends HTMLElement {
     if (!names.length) {
       tl.appendChild(ce("div", "tlempty", tr ? "Henüz bölge yok" : "No zones yet"));
     } else {
-      // Bantlarin ne oldugu yazmazsa kimse bilemez — kucuk bir lejant.
-      const tlhd = ce("div", "tlhd");
-      const lgi = (col, txt) => {
-        const x = ce("div", "lg");
-        const i = ce("i"); i.style.background = col;
-        x.appendChild(i); x.appendChild(ce("span", null, txt));
-        return x;
-      };
-      tlhd.appendChild(lgi("#c98f2e", tr ? "Alarm kuruluydu" : "Alarm was armed"));
-      tlhd.appendChild(lgi("#ffb86b", tr ? "Hareket" : "Movement"));
-      tl.appendChild(tlhd);
-      this._armBar = ce("div", "tlarm");
-      tl.appendChild(this._armBar);
       for (const nm of names) {
         const row = ce("div", "row");
         row.appendChild(ce("div", "nm", nm));
@@ -624,7 +576,7 @@ class SentinelAlarmCard extends HTMLElement {
       return s;
     };
     leg.appendChild(mkLeg("#5fe39a", tr ? "Kurulu" : "Armed"));
-    leg.appendChild(mkLeg("#ffb86b", tr ? "Tetik" : "Alarm"));
+    leg.appendChild(mkLeg("#ff4d6d", tr ? "Alarm çaldı" : "Alarm"));
     leg.appendChild(mkLeg("#1c1725", tr ? "Kapalı" : "Off"));
     shd.appendChild(leg);
     strip.appendChild(shd);
