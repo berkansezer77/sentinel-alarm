@@ -17,6 +17,15 @@
 
 ---
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/berkansezer77/sentinel-alarm/main/docs/images/card.gif" alt="The Sentinel card" width="880">
+</p>
+
+<p align="center">
+  <sub>The card: room movement over the last six hours, the alarm's own history along the bottom,<br>
+  and a glow that travels the edge — green while disarmed, red while armed.</sub>
+</p>
+
 ## What is it?
 
 Sentinel Alarm turns Home Assistant into a proper alarm panel. You define everything
@@ -104,8 +113,17 @@ every action step underneath it, and why each one ran or was skipped.
 Export your whole configuration to a file and import it back.
 
 ### Lovelace card
-A two-faced card: a calm everyday face, and an alarm face when something trips.
-The card resource registers itself — nothing to add manually.
+- **Room movement timeline** — one lane per room over the last six hours, a tick per
+  movement; the rooms that are active right now are picked out
+- **Twelve-hour strip** — when the alarm was armed, and when it went off
+- **Hold to arm** — nothing arms on a stray tap; with a code set, holding to disarm
+  opens a keypad
+- **Collapsible** — folds down to a single strip, and remembers your choice
+- **A glow that travels the edge** — green while disarmed, red while armed, faster
+  while the alarm is going off
+- **Your own background image** — drop one on the panel's settings
+
+The card registers itself as a Lovelace resource — nothing to add by hand.
 
 ## Installation
 
