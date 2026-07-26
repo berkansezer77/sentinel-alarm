@@ -1790,7 +1790,9 @@ class SentinelEngine:
         delay = max(0, int(leave.get("delay") or 0)) * 60
         mode = str(leave.get("mode") or "away")
         if delay <= 0:
-            await self._arm_mode(mode, self.msg("auto_leave"))
+            # Bekleme sifir olsa da _leave_elapsed uzerinden git: sessizlik
+            # kontrolu orada. Dogrudan _arm_mode cagirmak onu atliyordu.
+            await self._leave_elapsed(mode)
             return
         self._leave_timer = async_call_later(
             self.hass, delay, lambda _n: self.hass.async_create_task(self._leave_elapsed(mode))
