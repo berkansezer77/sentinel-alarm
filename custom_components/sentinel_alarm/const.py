@@ -7,7 +7,7 @@ FRONTEND_URL_BASE = "/sentinel_alarm_frontend"
 
 # Bump on every frontend change — the version lives in the FILE NAME (not ?v=)
 # so service workers / browser caches are forced to fetch the fresh file.
-FRONTEND_VERSION = "1.16.0"
+FRONTEND_VERSION = "1.17.0"
 
 # Lovelace custom card ships with the integration; version lives in the file
 # name so browser caches fetch the fresh file after an update.
@@ -41,6 +41,11 @@ DEFAULT_CONFIG = {
     "lang": "en",
     "code": "",
     "code_attempts": 3,
+    # Otomasyonlar (eve varış, saat programı, entity tetikleyicisi,
+    # bildirimdeki Kapat düğmesi) saklanan kodu kullanarak alarmı
+    # kapatabilsin mi? Varsayılan HAYIR: açık bırakmak, kodu bilmeyen
+    # birinin bir otomasyonu tetikleyerek alarmı kapatmasına izin verir.
+    "automation_disarm": False,
     "restore": True,
     "warn_on_blocked": True,
     "unavail_watch": True,

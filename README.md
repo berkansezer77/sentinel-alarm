@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="brand/icon.png" width="120" alt="Sentinel Alarm">
+  <img src="https://raw.githubusercontent.com/berkansezer77/sentinel-alarm/main/custom_components/sentinel_alarm/brand/icon.png" width="120" alt="Sentinel Alarm">
 </p>
 
 <h1 align="center">Sentinel Alarm</h1>
@@ -95,7 +95,8 @@ being installed. Voice selection dropdowns everywhere a voice can be chosen.
 
 ### Night lights (Sleep mode)
 A draggable timeline that keeps chosen lights on overnight at a set brightness and
-colour, from sunset to sunrise, then restores them to full brightness on disarm.
+colour, from sunset to sunrise. They are turned off when the window ends or when you
+disarm.
 
 <img src="https://raw.githubusercontent.com/berkansezer77/sentinel-alarm/main/docs/images/night-lights.png" alt="Night lights">
 
@@ -158,6 +159,35 @@ every page of the panel explained, with worked examples:
 [Recipes](https://github.com/berkansezer77/sentinel-alarm/wiki/Recipes) ·
 [Troubleshooting](https://github.com/berkansezer77/sentinel-alarm/wiki/Troubleshooting)
 
+## Services
+
+### `sentinel_alarm.arm`
+
+Arm or disarm from your own automations, scripts or a voice assistant.
+
+| Field | Required | Values |
+|-------|----------|--------|
+| `mode` | yes | `home`, `away`, `night`, `vacation`, `disarm` |
+| `bypass_open` | no | `true` arms even when a door or window is open (default `false`) |
+| `code` | no | the disarm code, when one is set |
+
+```yaml
+action: sentinel_alarm.arm
+data:
+  mode: away
+  bypass_open: false
+```
+
+The standard `alarm_control_panel.alarm_arm_away` / `alarm_disarm` services work too;
+this one exists for `bypass_open` and for naming the mode directly.
+
+**A note on codes.** When a disarm code is set, Sentinel's own automatic disarming —
+coming home, clock schedules, entity triggers and the **Disarm** button on a push
+notification — leaves the alarm armed rather than quietly using the stored code.
+Turn on **Let automations disarm** in the panel's settings if you want the old
+behaviour; it is off by default, because anyone able to fire one of those triggers
+could otherwise disarm without knowing the code.
+
 ## Adding the card
 
 The card is registered as a Lovelace resource automatically. Add it to a dashboard:
@@ -166,6 +196,10 @@ The card is registered as a Lovelace resource automatically. Add it to a dashboa
 type: custom:sentinel-alarm-card
 entity: alarm_control_panel.sentinel_alarm
 ```
+
+`entity` is the only option. The background image is not set in YAML — drop an image
+on **Sentinel → settings (gear) → Card**, or paste a `/local/…` path there, and every
+card picks it up.
 
 ## Requirements
 

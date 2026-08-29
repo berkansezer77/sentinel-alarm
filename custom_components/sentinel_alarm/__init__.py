@@ -311,7 +311,12 @@ class SentinelMediaView(HomeAssistantView):
                 else "Only audio files are allowed", status_code=400)
         safe = f"{slugify(stem) or ('image' if kind == 'image' else 'sound')}{ext.lower()}"
 
-        payload = field.file.read(MAX_UPLOAD + 1)
+        # aiohttp, eşiği aşan multipart gövdesini geçici bir dosyaya yazıyor;
+        # yani bu okuma 25 MB'lik SENKRON bir disk okuması olabilir. Event
+        # loop'ta yapılırsa tüm Home Assistant o süre boyunca durur.
+        payload = await self._hass.async_add_executor_job(
+            field.file.read, MAX_UPLOAD + 1
+        )
         if len(payload) > MAX_UPLOAD:
             return self.json_message("File too large", status_code=413)
 
@@ -509,5 +514,29 @@ def _register_services(hass: HomeAssistant, engine: SentinelEngine) -> None:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a config entry. The panel and static paths stay (harmless)."""
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    """Unload a config entry, releasing everything that would otherwise stack up.
+
+    The panel, the views and the static paths stay registered: Home Assistant
+    keeps them for the lifetime of the process, so the `frontend_registered`
+    marker has to survive too or a reload would try to register them a second
+    time. Everything that is per-setup is released here.
+
+    The notification-button listener mattered most. It was added on every setup
+    with no unsubscribe kept, so each reload stacked another handler — and every
+    one of them could disarm the alarm.
+    """
+    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if not unloaded:
+        return False
+
+    domain_data = hass.data.get(DOMAIN) or {}
+    engine: SentinelEngine | None = domain_data.get("engine")
+    if engine is not None:
+        engine.stop_auto()             # saat programı + entity tetikleyicileri
+        engine.stop_notify_actions()   # bildirim düğmesi dinleyicisi
+        engine.stop_beeps()
+        engine.cancel_actions()
+
+    hass.services.async_remove(DOMAIN, "arm")
+    domain_data.pop("engine", None)
+    return True

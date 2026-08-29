@@ -66,6 +66,10 @@ MSG = {
         "en": "Alarm could not be armed. {n} open.",
         "tr": "Alarm kurulamadı. {n} açık.",
     },
+    "auto_disarm_off": {
+        "en": "Automatic disarm is off — a code is set, so the alarm stayed armed.",
+        "tr": "Otomatik kapatma kapalı — kod tanımlı olduğu için alarm kurulu kaldı.",
+    },
     "quiet_wait": {
         "en": "Nobody is marked home, but {n} still shows movement — waiting before arming.",
         "tr": "Kimse evde görünmüyor ama {n} hâlâ hareket veriyor — kurmadan önce bekleniyor.",
@@ -188,6 +192,7 @@ class SentinelEngine:
         # `last_changed` tazelenir — hicbiri gercekten hareket etmemis olsa da.
         # Sessizlik kontrolu bunu hareket sanmasin diye acilis anini tutuyoruz.
         self._boot_at = dt_util.utcnow()
+        self._notify_unsub = None
         # Otomatik kurulum + geri sayım bipleri
         self._auto_unsubs: list = []
         self._leave_timer = None
@@ -1683,7 +1688,15 @@ class SentinelEngine:
             return
         try:
             if mode == "disarm":
-                await ent.async_alarm_disarm(self.config.get("code") or None)
+                # Saklanan kodu kendiliğinden vermek, kod korumasını bu uç
+                # için sözde bırakırdı: otomasyonu tetikleyebilen ya da
+                # bildirimdeki düğmeye basabilen herkes kodu bilmeden kapatırdı.
+                # Bu yüzden açık izin şart (varsayılan: kapalı).
+                code = self.config.get("code") or ""
+                if code and not self.config.get("automation_disarm"):
+                    self.log("blocked", self.msg("auto_disarm_off"), "")
+                    return
+                await ent.async_alarm_disarm(code or None)
             else:
                 await ent.async_arm_mode(mode, bypass_open=False)
             self.log("auto", f"{why}", mode if mode != "disarm" else "")
@@ -1917,7 +1930,19 @@ class SentinelEngine:
                 self.stop_beeps()
                 self.cancel_actions()
                 self.hass.async_create_task(self.async_siren(False))
-        self.hass.bus.async_listen("mobile_app_notification_action", _handler)
+        # Unsub saklanmazsa her kurulumda bir dinleyici daha birikir ve
+        # her biri alarmı kapatabilir. Önce eskisini bırak, sonra sakla.
+        self.stop_notify_actions()
+        self._notify_unsub = self.hass.bus.async_listen(
+            "mobile_app_notification_action", _handler
+        )
+
+    @callback
+    def stop_notify_actions(self) -> None:
+        """Bildirim düğmesi dinleyicisini bırak."""
+        if self._notify_unsub is not None:
+            self._notify_unsub()
+            self._notify_unsub = None
 
     # ------------------------------------------------------- gece ışıkları
     def night_light_entities(self) -> list[str]:

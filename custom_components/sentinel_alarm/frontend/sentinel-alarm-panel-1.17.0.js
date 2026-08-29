@@ -556,6 +556,9 @@ const I18N = {
   f_code:       { en: "Disarm code", tr: "Alarm kodu" },
   f_code_s:     { en: "typed on the alarm card, not here", tr: "alarm kartından girilir, buradan değil" },
   f_attempts:   { en: "Wrong code limit", tr: "Yanlış kod limiti" },
+  f_autodis:    { en: "Let automations disarm", tr: "Otomasyonlar kapatabilsin" },
+  f_autodis_s:  { en: "off by default — with a code set, coming home, schedules and the notification button leave the alarm armed",
+                  tr: "varsayılan kapalı — kod tanımlıysa eve varış, saat programı ve bildirim düğmesi alarmı kurulu bırakır" },
   attempts_u:   { en: "tries", tr: "deneme" },
   set_lang:     { en: "LANGUAGE", tr: "DİL" },
   set_ai:       { en: "AI VOICES", tr: "AI SESLER" },
@@ -862,7 +865,8 @@ class SentinelAlarmPanel extends HTMLElement {
       ["mode", false], ["open", false]]) if (nm.include[k] === undefined) nm.include[k] = v;
     if (!c.ai || typeof c.ai !== "object") c.ai = { provider: "", token: "" };
     for (const [k, v] of [["critical", true], ["restore", true], ["warn_on_blocked", true],
-      ["unavail_watch", true], ["light_guard", true], ["volume", 85], ["code_attempts", 3]])
+      ["unavail_watch", true], ["light_guard", true], ["volume", 85], ["code_attempts", 3],
+      ["automation_disarm", false]])
       if (c[k] === undefined) c[k] = v;
   }
 
@@ -4688,6 +4692,9 @@ class SentinelAlarmPanel extends HTMLElement {
     ed.appendChild(this._row(this.T("f_attempts"), "",
       this._slider(c.code_attempts, 1, 10, 1, (v) => { c.code_attempts = v; this._save(); },
         (v) => `${v} ${this.T("attempts_u")}`)));
+    ed.appendChild(this._row(this.T("f_autodis"), this.T("f_autodis_s"),
+      this._toggle(c.automation_disarm === true,
+        (v) => { c.automation_disarm = v; this._save(); })));
 
     /* kart arka plani — surukle birak ya da elle yol */
     ed.appendChild(label(this.T("set_card"), "mdi:card-outline"));
@@ -5001,7 +5008,7 @@ class SentinelAlarmPanel extends HTMLElement {
         (this._cfg.telegram_chat ? " · " + this._cfg.telegram_chat : "");
       const info = el("div", "tginfo");
       info.appendChild(icon("mdi:send-circle-outline"));
-      info.appendChild(el("span", null, this.T("ns_tg_note") + " " + note));
+      info.appendChild(el("span", null, esc(this.T("ns_tg_note") + " " + note)));
       body.appendChild(info);
     }
   }

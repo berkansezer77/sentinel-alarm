@@ -10,12 +10,11 @@
   "config_flow": true,
   "dependencies": [
     "http",
-    "panel_custom",
-    "websocket_api"
+    "panel_custom"
   ],
   "documentation": "https://github.com/berkansezer77/sentinel-alarm",
   "integration_type": "service",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/berkansezer77/sentinel-alarm/issues",
-  "version": "1.7.1"
+  "version": "1.8.0"
 }
