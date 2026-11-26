@@ -15,7 +15,10 @@ import time
 
 import voluptuous as vol
 
+from aiohttp import web
+
 from homeassistant.components import panel_custom
+from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import HomeAssistantView, StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -26,6 +29,7 @@ from homeassistant.util import slugify
 
 from .const import (
     DOMAIN,
+    CARD_VERSION,
     FRONTEND_URL_BASE,
     FRONTEND_VERSION,
     MODES,
@@ -50,15 +54,31 @@ def _is_admin(request) -> bool:
     return bool(user and user.is_admin)
 
 
-class SentinelConfigView(HomeAssistantView):
+class _EngineView(HomeAssistantView):
+    """A view that looks the engine up on every request.
+
+    Views live for the whole Home Assistant process, but a reload of the config
+    entry replaces the engine. Holding the engine from the constructor would keep
+    the panel talking to the unloaded one, so it is read from `hass.data` here.
+    """
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self._hass = hass
+
+    @property
+    def _engine(self) -> SentinelEngine:
+        engine = (self._hass.data.get(DOMAIN) or {}).get("engine")
+        if engine is None:
+            raise web.HTTPServiceUnavailable(text="Sentinel Alarm is not loaded")
+        return engine
+
+
+class SentinelConfigView(_EngineView):
     """Read/write the panel configuration (JSON, session required)."""
 
     url = "/api/sentinel_alarm/config"
     name = "api:sentinel_alarm:config"
     requires_auth = True
-
-    def __init__(self, engine: SentinelEngine) -> None:
-        self._engine = engine
 
     async def get(self, request):
         if not _is_admin(request):
@@ -81,15 +101,12 @@ class SentinelConfigView(HomeAssistantView):
         return self.json({"ok": True})
 
 
-class SentinelEventsView(HomeAssistantView):
+class SentinelEventsView(_EngineView):
     """The event log the panel shows on its dashboard tab."""
 
     url = "/api/sentinel_alarm/events"
     name = "api:sentinel_alarm:events"
     requires_auth = True
-
-    def __init__(self, engine: SentinelEngine) -> None:
-        self._engine = engine
 
     async def get(self, request):
         if not _is_admin(request):
@@ -121,15 +138,12 @@ class SentinelEventsView(HomeAssistantView):
         return self.json({"ok": True})
 
 
-class SentinelBackupView(HomeAssistantView):
+class SentinelBackupView(_EngineView):
     """Previous versions of the configuration, so an edit can be undone."""
 
     url = "/api/sentinel_alarm/backups"
     name = "api:sentinel_alarm:backups"
     requires_auth = True
-
-    def __init__(self, engine: SentinelEngine) -> None:
-        self._engine = engine
 
     async def get(self, request):
         if not _is_admin(request):
@@ -153,15 +167,12 @@ class SentinelBackupView(HomeAssistantView):
         return self.json({"ok": True})
 
 
-class SentinelActionView(HomeAssistantView):
+class SentinelActionView(_EngineView):
     """Arm / disarm / test actions triggered from the panel."""
 
     url = "/api/sentinel_alarm/action"
     name = "api:sentinel_alarm:action"
     requires_auth = True
-
-    def __init__(self, engine: SentinelEngine) -> None:
-        self._engine = engine
 
     async def post(self, request):
         if not _is_admin(request):
@@ -355,11 +366,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await hass.http.async_register_static_paths(
             [StaticPathConfig(FRONTEND_URL_BASE, frontend_dir, False)]
         )
-        hass.http.register_view(SentinelConfigView(engine))
-        hass.http.register_view(SentinelEventsView(engine))
-        hass.http.register_view(SentinelActionView(engine))
+        hass.http.register_view(SentinelConfigView(hass))
+        hass.http.register_view(SentinelEventsView(hass))
+        hass.http.register_view(SentinelActionView(hass))
         hass.http.register_view(SentinelMediaView(hass))
-        hass.http.register_view(SentinelBackupView(engine))
+        hass.http.register_view(SentinelBackupView(hass))
+
+        # The dashboard card ships inside this integration. It is loaded as an
+        # extra frontend module, the same way the panel is served, so the user's
+        # Lovelace resource list is never read or written.
+        add_extra_js_url(hass, f"{FRONTEND_URL_BASE}/sentinel-alarm-card-{CARD_VERSION}.js")
 
         try:
             await panel_custom.async_register_panel(
@@ -376,9 +392,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except ValueError:
             pass  # already registered (entry reload)
 
-        _register_services(hass, engine)
-        engine.setup_notify_actions()
         domain_data["frontend_registered"] = True
+
+    # Per-setup pieces. `async_unload_entry` removes these, so they are set up
+    # again on every setup, outside the once-per-process block above.
+    _register_services(hass, engine)
+    engine.setup_notify_actions()
 
     # Saat programı / kişi takibi — config değişiminde de yeniden kurulur.
     engine.setup_auto()
@@ -417,10 +436,13 @@ def _register_services(hass: HomeAssistant, engine: SentinelEngine) -> None:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry, releasing everything that would otherwise stack up.
 
-    The panel, the views and the static paths stay registered: Home Assistant
-    keeps them for the lifetime of the process, so the `frontend_registered`
-    marker has to survive too or a reload would try to register them a second
-    time. Everything that is per-setup is released here.
+    The panel, the views, the card module and the static paths stay registered:
+    Home Assistant keeps them for the lifetime of the process, so the
+    `frontend_registered` marker has to survive too or a reload would try to
+    register them a second time. The views read the engine from `hass.data` on
+    each request, so they follow the new engine after a reload. Everything that
+    is per-setup (service, notification listener, schedule) is released here and
+    set up again by `async_setup_entry`.
 
     The notification-button listener mattered most. It was added on every setup
     with no unsubscribe kept, so each reload stacked another handler — and every

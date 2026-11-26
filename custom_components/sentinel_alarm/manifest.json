@@ -9,6 +9,7 @@
   ],
   "config_flow": true,
   "dependencies": [
+    "frontend",
     "http",
     "panel_custom"
   ],
@@ -16,5 +17,5 @@
   "integration_type": "service",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/berkansezer77/sentinel-alarm/issues",
-  "version": "1.9.0"
+  "version": "1.10.0"
 }

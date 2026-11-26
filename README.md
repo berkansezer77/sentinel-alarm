@@ -124,7 +124,7 @@ Export your whole configuration to a file and import it back.
   while the alarm is going off
 - **Your own background image** — drop one on the panel's settings
 
-The card ships from its own repository — see [Adding the card](#adding-the-card).
+The card ships with the integration. See [Adding the card](#adding-the-card).
 
 ## Installation
 
@@ -190,33 +190,34 @@ could otherwise disarm without knowing the code.
 
 ## Adding the card
 
-The card lives in its own repository, so HACS installs and updates it the way it does
-any other Lovelace card — and it is HACS, acting for you, that writes the resource
-entry. This integration never touches your resource list.
+The card comes with the integration. When Sentinel Alarm loads, it adds the card to
+the frontend for you, the same way it serves its own panel, so there is nothing to
+install separately and nothing is written to your Lovelace resource list. Updating
+the integration updates the card.
 
-**HACS → ⋮ → Custom repositories**, add
-`https://github.com/berkansezer77/sentinel-alarm-card` under the **Dashboard**
-category, then install **Sentinel Alarm Card**. Once it is accepted into the HACS
-default list you will find it there directly.
+Add it to a dashboard like any other card (it is listed in the card picker as
+**Sentinel Alarm**), or in YAML:
 
 ```yaml
 type: custom:sentinel-alarm-card
 entity: alarm_control_panel.sentinel_alarm
 ```
 
-`entity` is the only option. The background image is not set in YAML — drop an image
+`entity` is the only option. The background image is not set in YAML. Drop an image
 on **Sentinel → settings (gear) → Card**, or paste a `/local/…` path there, and every
 card picks it up.
 
 You do not need the card at all. `alarm_control_panel.sentinel_alarm` is a normal
 alarm entity and works with Home Assistant's built-in Alarm panel card.
 
-### Coming from 1.8.0 or earlier
+### Coming from an earlier version
 
-Older versions registered the card resource themselves. That entry keeps working, so
-updating breaks nothing. If you move to the HACS card, delete the old entry under
-**Settings → Dashboards → Resources** first — with both present the file loads twice
-and Lovelace reports *Custom element doesn't exist*.
+Earlier versions either registered a card resource themselves (1.8.0 and older) or
+asked you to install the separate *Sentinel Alarm Card* repository from HACS (1.9.x).
+Neither is needed any more. Your dashboards keep working, but clean up the leftovers:
+
+- remove **Sentinel Alarm Card** from HACS if you installed it, and
+- delete any `sentinel-alarm-card` entry under **Settings → Dashboards → Resources**.
 
 ## Requirements
 

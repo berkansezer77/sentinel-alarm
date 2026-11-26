@@ -59,6 +59,10 @@ MAX_SNAPSHOTS = 30     # www/sentinel'de tutulan kamera fotoğrafı sayısı
 # it snaps the light back to its pre-alert colour when it ends.
 ALERT_SECONDS = 15.0
 QUIET_RECHECK = 60.0     # ev sessizlesmediyse kac saniyede bir tekrar bak
+# Kilit adımı: komuttan sonra kilidin "locked" olmasını bu kadar bekle.
+# Nuki kilitlenmeyi ~20 sn'de bitiriyor; "locking" sürerken süre uzatılır.
+LOCK_VERIFY_SECONDS = 35.0
+LOCK_VERIFY_EXTRA = 30.0
 
 # Bilingual message templates. {n} is filled with a device name / list.
 MSG = {
@@ -115,6 +119,10 @@ MSG = {
     "light_off": {
         "en": "{n} was switched on while armed and has been turned off.",
         "tr": "Alarm kuruluyken {n} açıldı ve kapatıldı.",
+    },
+    "lock_failed": {
+        "en": "Door NOT locked: {n} did not lock, even after a second try.",
+        "tr": "Kapı KİLİTLENMEDİ: {n} ikinci denemede de kilitlenmedi.",
     },
     "wrong_code": {
         "en": "Wrong disarm code entered {n} times.",
@@ -173,6 +181,7 @@ class SentinelEngine:
         self._sim_offsets: dict[str, int] = {}
         self._sim_day: str = ""
         self._action_task = None
+        self._lock_task = None      # kilit adımının arka plan kontrolü
         # Hangi ışıklar şu an flash'ta? Durdurulursa geri alabilmek için.
         self._flash_active: list[str] = []
         self._after_scene = ""
@@ -1437,6 +1446,12 @@ class SentinelEngine:
             if service:
                 await self._spread(kind, service, ents, {},
                                    max(0.0, float(step.get("stagger") or 0)))
+                # Kilit komutu "gönder ve unut" değil: kilit gerçekten
+                # kilitlendi mi diye arka planda bakılır, gerekirse bir kez
+                # daha denenir, yine olmazsa haber verilir. Zincir beklemez,
+                # TV/klima gibi sonraki adımlar gecikmez.
+                if kind == "lock" and service == "lock":
+                    self._start_lock_watch(ents)
             return
 
         if kind in ("scene", "script"):
@@ -1619,6 +1634,86 @@ class SentinelEngine:
             await self._call(domain, service, dict(data, entity_id=eid))
             if i < len(ents) - 1:
                 await asyncio.sleep(gap)
+
+    # ------------------------------------------------------- kilit doğrulama
+    @callback
+    def _start_lock_watch(self, ents: list[str]) -> None:
+        """Kilit komutunun gerçekten tuttuğunu arka planda kontrol et.
+
+        Kilit (ör. Nuki köprüsü) komutu bazen sessizce yutuyor: servis
+        çağrısı hatasız döner ama kilit hiç dönmez. Eskiden bunu kimse fark
+        etmiyordu; kapı açık kalıyor, alarm kurulu görünüyordu.
+        """
+        if self._lock_task and not self._lock_task.done():
+            self._lock_task.cancel()
+        self._lock_task = self.hass.async_create_background_task(
+            self._verify_locks(list(ents), self._mode_now()),
+            "sentinel_alarm_lock_verify",
+        )
+
+    def _lock_state(self, eid: str) -> str:
+        st = self.hass.states.get(eid)
+        return st.state if st else "missing"
+
+    async def _wait_locked(self, ents: list[str]) -> list[str]:
+        """Hepsi `locked` olana kadar bekle; kilitlenmeyenleri döndür.
+
+        Süre dolduğunda kilit hâlâ "locking" diyorsa motor dönüyordur,
+        biraz daha beklenir (bir kez).
+        """
+        loop = asyncio.get_running_loop()
+        end = loop.time() + LOCK_VERIFY_SECONDS
+        extended = False
+        while True:
+            left = [e for e in ents if self._lock_state(e) != "locked"]
+            if not left:
+                return []
+            if loop.time() >= end:
+                if not extended and any(self._lock_state(e) == "locking" for e in left):
+                    end += LOCK_VERIFY_EXTRA
+                    extended = True
+                else:
+                    return left
+            await asyncio.sleep(1.0)
+
+    async def _verify_locks(self, ents: list[str], mode_at_start: str) -> None:
+        def disarmed_since() -> bool:
+            # Alarm kuruluyken/kurulurken başladıysak ve bu arada kapatıldıysa
+            # (eve dönüldü) kapıyı yeniden kilitlemek ya da uyarmak yanlış olur.
+            return bool(mode_at_start) and not self._mode_now()
+
+        left = await self._wait_locked(ents)
+        if not left or disarmed_since():
+            return
+        _LOGGER.warning(
+            "Sentinel: lock did not engage (%s), retrying once",
+            ", ".join(f"{e}={self._lock_state(e)}" for e in left),
+        )
+        await self._call("lock", "lock", {"entity_id": left})
+        left = await self._wait_locked(left)
+        if not left or disarmed_since():
+            return
+
+        names = ", ".join(f"{self.name_of(e)} ({self._lock_state(e)})" for e in left)
+        text = self.msg("lock_failed", names)
+        _LOGGER.warning("Sentinel: %s", text)
+        # "blocked" türü panelde kırmızı uyarı satırı olarak görünür.
+        self.log("blocked", text, self._mode_now() or mode_at_start, left[0])
+        # Uyarı, bu modun KURULUNCA zincirindeki bildirim adımlarının
+        # alıcılarına gider (telefon) + Ayarlar'daki Telegram grubuna.
+        # Bildirim adımı yoksa varsayılan yol (Telegram) kullanılır.
+        targets: list[str] = []
+        for s in self.action_steps("arm", mode_at_start):
+            if s.get("type") == "notify":
+                for t in s.get("notify") or []:
+                    if t and t not in targets:
+                        targets.append(t)
+        await self.async_notify(
+            text,
+            critical=False,
+            targets=targets or None,
+            tg_chat="settings" if targets else None,
+        )
 
     async def _call(self, domain: str, service: str, data: dict,
                     blocking: bool = False, context: Context | None = None) -> None:

@@ -6,7 +6,9 @@
  *   alt      -> son 12 saat şeridi (kurulu · tetik · kapalı)
  *   çerçeve  -> nefes alan glow: kuruluyken kırmızı, kapalıyken yeşil
  *
- * Vanilla web component (Lit yok), entegrasyonla birlikte gelir.
+ * Vanilla web component (Lit yok) — build adımı yok.
+ * Sentinel Alarm entegrasyonunun eşlikçisi; veriyi
+ * alarm_control_panel entity'sinin attribute'larından okur.
  */
 
 const CARD_MODES = [
@@ -743,7 +745,7 @@ if (!window.customCards.some((c) => c.type === "sentinel-alarm-card")) {
   window.customCards.push({
     type: "sentinel-alarm-card",
     name: "Sentinel Alarm",
-    description: "Kat planı, bölge durumu, son 12 saat ve alarm anı",
+    description: "Floor plan, zone status, a twelve-hour strip and the alarm itself",
     preview: true,
   });
 }

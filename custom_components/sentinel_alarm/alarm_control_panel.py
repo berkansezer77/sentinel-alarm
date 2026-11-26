@@ -38,6 +38,10 @@ from homeassistant.util import dt as dt_util
 from .const import DOMAIN, SIGNAL_CONFIG
 from .engine import SentinelEngine
 
+# Seconds after start-up during which a sensor returning from unknown/unavailable
+# is treated as "still where it was", not as a fresh trip.
+STARTUP_GRACE = 90.0
+
 _LOGGER = logging.getLogger(__name__)
 
 # Kod yanlış girilmeye devam ederse beklemeyi uzat. Sıfırlanmaz: her tur bir
@@ -107,6 +111,7 @@ class SentinelAlarmPanel(AlarmControlPanelEntity, RestoreEntity):
         self._unsub_lights = None
         self._unsub_cfg = None
         self._unavail_seen: set[str] = set()
+        self._started_at = time.monotonic()   # startup grace (see STARTUP_GRACE)
 
     # --------------------------------------------------------------- HA plumbing
     @property
@@ -159,6 +164,7 @@ class SentinelAlarmPanel(AlarmControlPanelEntity, RestoreEntity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        self._started_at = time.monotonic()
 
         if self._engine.config.get("restore", True):
             last = await self.async_get_last_state()
@@ -476,6 +482,17 @@ class SentinelAlarmPanel(AlarmControlPanelEntity, RestoreEntity):
             self._cancel_pending(eid)
             return
         self._unavail_seen.discard(eid)
+
+        # Just after a restart sensors come back from unknown/unavailable showing
+        # whatever they already were (a presence sensor that sees someone reports
+        # "on"). That is not a new event, so it must not trip the restored alarm.
+        # 22 Nov 2026: the office presence sensor did exactly this 3 s after boot.
+        old = event.data.get("old_state")
+        if (
+            (old is None or old.state in (STATE_UNAVAILABLE, STATE_UNKNOWN))
+            and time.monotonic() - self._started_at < STARTUP_GRACE
+        ):
+            return
 
         if not self._engine.is_active(eid, new.state):
             # Went quiet again — a presence sensor that only blipped never
